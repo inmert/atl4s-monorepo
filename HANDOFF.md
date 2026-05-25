@@ -19,14 +19,14 @@ Gazebo Harmonic ◀─UDP 9002 (FDM)─▶ ArduCopter ──TCP 5760──▶ MA
   (atl4s-gazebo)                  (--model JSON,                                  (atl4s-mavros)
                                    atl4s-sitl)
        │
-       └─ camera/imu/clock ─▶ gz-bridge ─▶ /camera/image, /imu/gazebo, /clock
-                              (atl4s-gz-bridge)
+       └─ camera ──▶ gz-bridge ─▶ /camera/image, /camera/camera_info
+                     (atl4s-gz-bridge)
 ```
 
 - **Gazebo** runs `iris_runway.sdf` headless on the L4 GPU with the `ardupilot_gazebo` plugin loaded. Plugin listens on UDP 127.0.0.1:9002 for the JSON FDM stream.
 - **SITL** runs `arducopter --model JSON --defaults copter.parm,gazebo-iris.parm`. Sensors (IMU, GPS, baro) come from Gazebo over JSON FDM. MAVLink still exposed on TCP 5760, fan-out to MAVROS unchanged via MAVProxy `--out udp:127.0.0.1:14550` (bidirectional).
 - **gz-bridge** runs `ros_gz_bridge parameter_bridge` with a YAML config that renames the long Gazebo topic paths to short stable ROS 2 names. One-way (GZ_TO_ROS); MAVROS handles all commands into the vehicle.
-- **MAVROS** binds UDP `0.0.0.0:14550`, uses `apm.launch`, publishes ~140 topics under `/mavros/*` with **Best Effort** QoS.
+- **MAVROS** binds UDP `0.0.0.0:14550`, uses `apm.launch` with a pruned plugin allowlist ([services/mavros/apm_pluginlists.yaml](services/mavros/apm_pluginlists.yaml)). ~18 plugins load (vs the upstream ~60), publishing ~50 topics under `/mavros/*` with **Best Effort** QoS — every plugin whose data a downstream service uses, plus setpoint/waypoint/geofence for upcoming commander work.
 - All containers use `network_mode: host` so DDS discovery and same-host UDP work without per-service port maps.
 - ROS topics over WAN (drone ↔ VM) will be bridged via Zenoh (`zenoh-bridge-ros2dds`) once Orin sensor topics are in scope.
 
@@ -99,9 +99,9 @@ atl4s-monorepo/
 
 - Gazebo Harmonic 8.11 rendering on L4 GPU, iris_with_gimbal model in `iris_runway.sdf`.
 - SITL: `arducopter --model JSON` connected to Gazebo's FDM bridge on UDP 9002. 1413 params synced, EKF3 IMU0/1 initialised and tilt-aligned, `ArduPilot Ready`. MAVProxy `--streamrate 10` (was the default 4 → topic rates were ~2 Hz).
-- MAVROS: bound on `0.0.0.0:14550`, link established. `/mavros/*` sensor topics at ~5 Hz (capped by ArduPilot below the requested 10).
-- gz-bridge: `/camera/image` (640×480 @ 5 Hz), `/camera/camera_info`, `/imu/gazebo` (~600 Hz), `/clock` (~600 Hz) flowing as ROS 2 topics.
-- Foxglove: WebSocket on `0.0.0.0:8765`. BE whitelist covers `/imu/gazebo`, `/clock`, `/mavros/.*`, `/uas1/.*` (raw MAVLink dropped silently without the last one).
+- MAVROS: bound on `0.0.0.0:14550`, link established. `/mavros/*` sensor topics at ~5 Hz (capped by ArduPilot below the requested 10). Plugin allowlist trims the loaded plugin count to ~18 (from upstream ~60); see [services/mavros/apm_pluginlists.yaml](services/mavros/apm_pluginlists.yaml) — add a name and rebuild to expose another plugin.
+- gz-bridge: `/camera/image` (640×480 @ 5 Hz) and `/camera/camera_info` flowing as ROS 2 topics. `/imu/gazebo` and `/clock` were intentionally dropped — sim-only streams with no real-drone analog; production IMU is `/mavros/imu/data`.
+- Foxglove: WebSocket on `0.0.0.0:8765`. BE whitelist covers `/mavros/.*`, `/uas1/.*` (raw MAVLink dropped silently without the last one), `/lidar/.*`, `/perception/.*`, `/fusion/.*`.
 - Commander: low-battery → `set_mode RTL` verified end-to-end (forced via `BATTERY_LOW_THRESHOLD=1.0`).
 - perception-lidar: subscribes to `/lidar/points`, publishes `/perception/lidar/detections` (`atl4s_msgs/LidarDetectionArray`). Runtime config from `config/pipelines/perception-lidar.yaml`. DBSCAN + per-class shape priors (aircraft, tank). No live `/lidar/points` source on the VM; verified end-to-end against `scripts/publish-fake-lidar.sh` — Pipelines card flips to Running, detections stream at 5 Hz, dashboard `/ws/ros/sample` deserializes the atl4s_msgs payload correctly.
 - rosbag-manager: HTTP API on `127.0.0.1:8086` for record / upload / GCS browser / replay. Smoke tested end-to-end via `./scripts/bag-record.sh` — record subprocess + watcher upload + GCS confirmed; replay downloads from GCS, plays, and cleans up `${REPLAY_DIR}`.
@@ -143,7 +143,7 @@ Most `/mavros/*` topics are Best Effort. `ros2 topic echo` defaults to Reliable 
 
 Foxglove Bridge subscribes Reliable + Volatile by default. Two failure modes:
 
-1. **BE publisher + Reliable sub → no data.** Fix via the `best_effort_qos_topic_whitelist` regex list in [services/foxglove/params.yaml](services/foxglove/params.yaml). Current entries: `/imu/gazebo`, `/clock`, `/mavros/.*`, `/uas1/.*`. Add new BE namespaces here when you create services.
+1. **BE publisher + Reliable sub → no data.** Fix via the `best_effort_qos_topic_whitelist` regex list in [services/foxglove/params.yaml](services/foxglove/params.yaml). Current entries: `/mavros/.*`, `/uas1/.*`, `/lidar/.*`, `/perception/.*`, `/fusion/.*`. Add new BE namespaces here when you create services.
 2. **TRANSIENT_LOCAL publisher + Volatile sub → latched message missed.** Affects `/tf_static`, `/mavros/home_position/home`, `/mavros/mission/*`, `/mavros/global_position/gp_origin`. They appear "stuck waiting for next message" in Foxglove panels because the latched value was sent before the sub joined. `foxglove_bridge 3.x` auto-matches durability when it sees the publisher's QoS, so this is usually fine in practice — but if a specific latched topic is empty in Foxglove, this is why.
 
 ### MAVProxy stream rate
@@ -181,6 +181,24 @@ Two harmless messages on every `atl4s-gazebo` start:
 - `Error while loading the library [libGstCameraPlugin.so]: libdebuginfod.so.1: cannot open shared object file` — the gstreamer camera-streaming plugin needs `libdebuginfod1` at runtime. We use `ros_gz_bridge` instead. Install `libdebuginfod1` in the gazebo image to silence.
 - `libEGL warning: egl: failed to create dri2 screen` — Gazebo's EGL backend falls back from DRI2 to the NVIDIA EGL device extension, which works. `nvidia-smi` inside the container shows the GPU in use.
 
+### `/uas1/*` topics are mavros internal plumbing
+
+The `/uas1/mavlink_source` (~138 Hz, FCU → us) and `/uas1/mavlink_sink` (~12 Hz, us → FCU) topics are mavros's internal IPC, not user-facing. mavros runs as two cooperating processes: `mavros_router` owns the UDP socket and republishes raw MAVLink frames on `/uas1/mavlink_source`; `mavros_node` consumes them, parses MAVLink into the typed `/mavros/*` topics, and publishes commands on `/uas1/mavlink_sink` that `mavros_router` ferries back to the FCU. The only subscriber to either topic is mavros itself.
+
+Implications: (1) they cannot be removed — disabling them breaks mavros end-to-end. (2) they explain why `/uas1/.*` is on the foxglove BE whitelist (without it, raw MAVLink panels in Studio show empty under default Reliable). (3) adding a second MAVLink endpoint (e.g. the Orin Nano on a separate UDP channel) would create `/uas2/*` for that endpoint; routing the Orin through the same MAVProxy fan-out into UDP 14550 keeps everything on `/uas1/*` instead.
+
+### `/mavros/param/get` looks like a service but has no server
+
+`ros2 service list -t` reports `/mavros/param/get [mavros_msgs/srv/ParamGet]` and `ros2 service type` resolves it cleanly — but `ros2 service call /mavros/param/get …` hangs at `waiting for service to become available...` and then exits with a noisy `failed to check service availability: rcl node's context is invalid` message. The error line is a CLI teardown artifact, not the real failure; the underlying call is `wait_for_service` correctly returning `False`.
+
+Cause: `mavros_msgs/srv/ParamGet` is a **mavros 1.x legacy service**. mavros 2.x replaced it with the standard `rcl_interfaces` parameter API (`/mavros/param/get_parameters`, `/mavros/param/set_parameters`, …), so no node hosts the legacy service anymore. The reason it still shows in the graph is that **`foxglove_bridge` registers a service _client_ for it** (`ros2 node info /foxglove_bridge | grep param/get` confirms). ROS 2's service introspection happily lists a service the moment any participant — client or server — advertises the name, which makes a phantom service indistinguishable from a real one at first glance.
+
+How to tell client-only from server-backed: `ros2 service find <type>` returns names known to the graph; **`ros2 node info <node>`** is the only canonical way to see which side (Server vs Client) each node owns. To call the parameter API on mavros, use `/mavros/param/get_parameters` (and call `/mavros/param/pull` first to populate the FCU cache).
+
+### `ArduPilot controller has reset` warning
+
+Steady ~0.6/min in `atl4s-gazebo` logs (`[Wrn] [ArduPilotPlugin.cc:1599]`). This is the `ardupilot_gazebo` plugin re-syncing with the SITL JSON-FDM channel after the occasional UDP packet drops between containers — `network_mode: host` shares the namespace but Linux still drops sub-microsecond bursts under load. Harmless at this rate (the plugin re-converges within one tick). Investigate only if the rate climbs above ~10/min or telemetry actually glitches.
+
 ### `ros2 bag record` QoS override YAML
 
 `ros2 bag record` defaults its subscribers to Reliable. To capture `/mavros/*` (Best Effort) you must pass `--qos-profile-overrides-path` with per-topic profiles. The YAML shape Humble's parser accepts is `topic: <dict>`, **not** `topic: [<dict>]` — the more common list form crashes with `'list' object has no attribute 'items'`. `rosbag-manager` (`app/record.py`) generates the correct shape per recording from the request's `topics` list.
@@ -199,7 +217,7 @@ A repo-root `.dockerignore` keeps the three context=. builds from shipping the w
 
 ### ROS `byte` field → 1-char string in JSON
 
-`rosidl_runtime_py.message_to_ordereddict()` represents ROS `byte` fields as 1-character `str`, not `int`. `diagnostic_msgs/DiagnosticStatus.level` is the obvious one (`b'\x00'` becomes `" "` in the JSON the dashboard ships to the browser). The dashboard frontend coerces via `String.charCodeAt(0)` in `pages/Health.tsx` and `App.tsx`. Other byte fields to watch for if they ever surface: `sensor_msgs/BatteryState.power_supply_status`, `sensor_msgs/Imu` orientation_covariance (no, that's float).
+`rosidl_runtime_py.message_to_ordereddict()` represents ROS `byte` fields as 1-character `str`, not `int`. `diagnostic_msgs/DiagnosticStatus.level` is the obvious one (`b'\x00'` becomes `"\u0000"` in the JSON the dashboard ships to the browser). The dashboard frontend coerces via `String.charCodeAt(0)` in `pages/Health.tsx` and `App.tsx`. Other byte fields to watch for if they ever surface: `sensor_msgs/BatteryState.power_supply_status`, `sensor_msgs/Imu` orientation_covariance (no, that's float).
 
 ### HTTP Basic auth across WebSocket upgrades
 
@@ -215,8 +233,8 @@ The topic bridge (`services/dashboard/backend/topics.py`) calls `node.get_topic_
 |---|---|---|---|---|
 | 1 | `sitl` | running | sim | ArduCopter (`--model JSON`) + MAVProxy. `MAVPROXY_STREAMRATE` (default 10) controls `/mavros/*` rate. |
 | 2 | `gazebo` | running | sim | Gazebo Harmonic 8.11 + `ardupilot_gazebo` plugin. Iris+gimbal in `iris_runway.sdf`. Headless EGL on the L4. SITL plugin on UDP 127.0.0.1:9002. |
-| 3 | `gz-bridge` | running | sim | `ros_gz_bridge` mapping `/world/iris_runway/.../*` → `/camera/image`, `/camera/camera_info`, `/imu/gazebo`, `/clock`. One-way (GZ_TO_ROS). Add mappings in [services/gz-bridge/bridge.yaml](services/gz-bridge/bridge.yaml). |
-| 4 | `mavros` | running | always | MAVLink ⇄ ROS 2 bridge via `apm.launch`. |
+| 3 | `gz-bridge` | running | sim | `ros_gz_bridge` mapping `/world/iris_runway/.../*` → `/camera/image`, `/camera/camera_info`. One-way (GZ_TO_ROS). Sim-only `/imu/gazebo` and `/clock` deliberately not bridged (no real-drone analog). Add mappings in [services/gz-bridge/bridge.yaml](services/gz-bridge/bridge.yaml). |
+| 4 | `mavros` | running | always | MAVLink ⇄ ROS 2 bridge via `apm.launch`. Plugin allowlist in [services/mavros/apm_pluginlists.yaml](services/mavros/apm_pluginlists.yaml) — 18 plugins load (vs upstream ~60), ~50 `/mavros/*` topics on the bus. |
 | 5 | `foxglove` | running | always | `foxglove_bridge 3.3.0` on TCP 8765. BE whitelist in `params.yaml`; `mavros_msgs` installed so Studio can call MAVROS services. Add the `-msgs` package of every new service that exposes services. |
 | 6 | `commander` | running | always | Autonomy. Low-battery latch → `/mavros/set_mode RTL`. Threshold via `BATTERY_LOW_THRESHOLD`. |
 | 7 | `rosbag-manager` | running | always | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser (list / upload / download / delete), and replay via `ros2 bag play`. Binds `127.0.0.1:8086` (loopback only). `FROM ros:humble`. Consumed by `dashboard`, `scripts/bag-record.sh`, and any future caller on the host. |

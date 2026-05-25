@@ -1,14 +1,11 @@
 /foxglove_bridge:
   ros__parameters:
     # Topic regexes for which the bridge subscribes Best Effort instead of its
-    # default Reliable. Prevents backpressure on high-rate publishers like the
-    # Gazebo IMU (~600 Hz). Other RELIABLE subscribers (bag-record) are
-    # unaffected since DDS allows a BE subscriber alongside reliable ones.
+    # default Reliable. Prevents backpressure on high-rate BE publishers and
+    # silent drops of BE-published topics under a Reliable subscription.
     # /uas1/.* is MAVROS's raw MAVLink stream (BE publisher); without this
     # entry Foxglove silently drops every Mavlink message.
     best_effort_qos_topic_whitelist:
-      - "/imu/gazebo"
-      - "/clock"
       - "/mavros/.*"
       - "/uas1/.*"
       - "/lidar/.*"

@@ -22,7 +22,7 @@ Authoritative list of topics other services depend on. Update when a service is 
 | `/mavros/cmd/arming` (service) | `mavros_msgs/CommandBool` | in | Arm/disarm |
 | `/mavros/set_mode` (service) | `mavros_msgs/SetMode` | in | Flight mode change |
 
-MAVROS publishes ~140 topics under `/mavros/*`. Most that aren't listed have no data in default SITL because ArduPilot doesn't stream that message group at the configured rates. Run `ros2 topic list` for the full set and `ros2 topic hz <topic> --qos-reliability best_effort` to see which are actually publishing.
+MAVROS publishes the topics for the plugins in its allowlist (see [services/mavros/apm_pluginlists.yaml](../services/mavros/apm_pluginlists.yaml)). Run `ros2 topic list` for the full live set and `ros2 topic hz <topic>` to see which are actually publishing (`hz` subscribes Best Effort by default; `echo` needs `--qos-reliability best_effort`).
 
 ## Gazebo sensors (gz-bridge, sim profile)
 
@@ -30,10 +30,8 @@ MAVROS publishes ~140 topics under `/mavros/*`. Most that aren't listed have no 
 |---|---|---|---|
 | `/camera/image` | `sensor_msgs/Image` | out | RGB frames from the iris gimbal camera (640×480 @ 5 Hz) |
 | `/camera/camera_info` | `sensor_msgs/CameraInfo` | out | Intrinsics for `/camera/image` |
-| `/imu/gazebo` | `sensor_msgs/Imu` | out | Ground-truth IMU (~600 Hz, Best Effort recommended) |
-| `/clock` | `rosgraph_msgs/Clock` | out | Sim time (~600 Hz) |
 
-Renames are configured in [services/gz-bridge/bridge.yaml](../services/gz-bridge/bridge.yaml). Gazebo-side topic paths include the world name; the ROS-side names stay constant.
+Renames are configured in [services/gz-bridge/bridge.yaml](../services/gz-bridge/bridge.yaml). Gazebo-side topic paths include the world name; the ROS-side names stay constant. The Gazebo-side raw IMU (`/world/.../imu_sensor/imu`) and `/world/iris_runway/clock` are intentionally not bridged — sim-only streams with no real-drone analog. Production IMU is `/mavros/imu/data` from ArduPilot, and the pipeline runs on wall-clock.
 
 ## Health
 

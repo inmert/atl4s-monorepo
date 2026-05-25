@@ -4,13 +4,10 @@
 # Source topic names come from `gz topic -l` against the live atl4s-gazebo
 # container. ROS 2 names are stable contracts the rest of the stack relies on.
 #
-# QoS notes:
-#  - /imu/gazebo and /clock are high-rate (~600 Hz). Reliable QoS at that rate
-#    causes the WebSocket forwarder (Foxglove Studio) to back-pressure and
-#    drop messages with "A message was lost!!!" warnings. Best Effort lets the
-#    DDS layer drop on overflow instead, which is the right behaviour for
-#    high-rate sensor streams.
-#  - /camera/image is ~5 Hz; Reliable is fine.
+# Scope rule: only bridge sensor topics that have a real-drone analog. The
+# Gazebo IMU and /clock are sim-only — the production drone's IMU goes
+# through ArduPilot → MAVROS (/mavros/imu/data) and we don't use sim time.
+# Camera + camera_info have a RealSense-on-Orin analog, so they stay.
 
 - ros_topic_name: /camera/image
   gz_topic_name: /world/iris_runway/model/iris_with_gimbal/model/gimbal/link/pitch_link/sensor/camera/image
@@ -23,17 +20,3 @@
   ros_type_name: sensor_msgs/msg/CameraInfo
   gz_type_name: gz.msgs.CameraInfo
   direction: GZ_TO_ROS
-
-- ros_topic_name: /imu/gazebo
-  gz_topic_name: /world/iris_runway/model/iris_with_gimbal/model/iris_with_standoffs/link/imu_link/sensor/imu_sensor/imu
-  ros_type_name: sensor_msgs/msg/Imu
-  gz_type_name: gz.msgs.IMU
-  direction: GZ_TO_ROS
-  publisher_queue_size: 200
-
-- ros_topic_name: /clock
-  gz_topic_name: /world/iris_runway/clock
-  ros_type_name: rosgraph_msgs/msg/Clock
-  gz_type_name: gz.msgs.Clock
-  direction: GZ_TO_ROS
-  publisher_queue_size: 200

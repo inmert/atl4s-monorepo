@@ -17,10 +17,10 @@ The container `depends_on: gazebo` so Gazebo comes up first. If `atl4s-gazebo` i
 
 | Endpoint | Direction | Consumer |
 |---|---|---|
-| TCP `127.0.0.1:5760` | listening | MAVProxy (in-container) |
+| TCP `0.0.0.0:5760` | listening | MAVProxy (in-container) |
 | UDP `127.0.0.1:14550` | bidirectional (`udp:`) | `mavros` |
 
-`network_mode: host`, so `127.0.0.1` is the VM loopback. MAVProxy uses `udp:` so MAVROS commands round-trip back to ArduPilot. Use `udpout:` only for an explicitly send-only channel.
+`network_mode: host`, so `arducopter --base-port 5760` binds the wildcard interface on the VM. The MAVLink TCP port is reachable from anything that can route to the host — keep firewall posture in mind if you ever open it externally. MAVProxy uses `udp:` so MAVROS commands round-trip back to ArduPilot. Use `udpout:` only for an explicitly send-only channel.
 
 ## Configuration
 

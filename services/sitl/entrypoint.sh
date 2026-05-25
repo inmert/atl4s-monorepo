@@ -28,12 +28,17 @@ echo "[entrypoint] Starting MAVProxy (streamrate=${MAVPROXY_STREAMRATE} Hz), for
 # exits, and the container restart-loops.
 # --streamrate drives /mavros/* topic rates; see HANDOFF "MAVProxy stream
 # rate" for why this is the only knob in ArduCopter 4.8.
+# stdout → /dev/null silences the per-second STATUSTEXT echoes
+# ("Flight battery 100 percent" etc.) that otherwise flood docker logs;
+# stderr stays attached so real errors are still surfaced. Full binary
+# tlog is captured via --logfile if forensics are needed.
 mavproxy.py \
     --master tcp:127.0.0.1:5760 \
     --out "${MAVPROXY_OUT}" \
     --streamrate "${MAVPROXY_STREAMRATE}" \
     --non-interactive \
-    --logfile /tmp/mavproxy.log &
+    --logfile /tmp/mavproxy.log \
+    >/dev/null &
 
 # Exit if either process dies so Docker restarts the whole container.
 wait -n

@@ -136,7 +136,7 @@ services:
       GCS_BUCKET: ${GCS_BUCKET:-atl4s-rosbags}
       ROSBAG_MANAGER_BIND: ${ROSBAG_MANAGER_BIND:-127.0.0.1}
       ROSBAG_MANAGER_PORT: ${ROSBAG_MANAGER_PORT:-8086}
-      RECORD_TOPICS: ${RECORD_TOPICS:-/mavros/state /mavros/battery /mavros/global_position/global /mavros/imu/data /camera/image /camera/camera_info /imu/gazebo /clock}
+      RECORD_TOPICS: ${RECORD_TOPICS:-/mavros/state /mavros/battery /mavros/global_position/global /mavros/imu/data /camera/image /camera/camera_info}
       STABLE_SECONDS: ${ROSBAG_MANAGER_STABLE_SECONDS:-15}
       POLL_SECONDS: ${ROSBAG_MANAGER_POLL_SECONDS:-10}
     # YAML <<: merge does not deep-merge lists; the x-common volume must be

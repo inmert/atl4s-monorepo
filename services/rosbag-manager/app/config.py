@@ -9,7 +9,7 @@ GCS_BUCKET = os.environ.get('GCS_BUCKET', 'atl4s-rosbags')
 DEFAULT_RECORD_TOPICS = os.environ.get(
     'RECORD_TOPICS',
     '/mavros/state /mavros/battery /mavros/global_position/global '
-    '/mavros/imu/data /camera/image /camera/camera_info /imu/gazebo /clock',
+    '/mavros/imu/data /camera/image /camera/camera_info',
 ).split()
 
 STABLE_SECONDS = int(os.environ.get('STABLE_SECONDS', '15'))

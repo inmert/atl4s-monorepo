@@ -28,10 +28,8 @@ RUN git clone --depth 1 https://github.com/ArduPilot/ardupilot_gazebo.git /ardup
     && cmake -S /ardupilot_gazebo -B /ardupilot_gazebo/build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     && cmake --build /ardupilot_gazebo/build -j"$(nproc)"
 
-COPY world/ /atl4s/worlds/
-
 ENV GZ_SIM_SYSTEM_PLUGIN_PATH=/ardupilot_gazebo/build
-ENV GZ_SIM_RESOURCE_PATH=/ardupilot_gazebo/models:/ardupilot_gazebo/worlds:/atl4s/worlds
+ENV GZ_SIM_RESOURCE_PATH=/ardupilot_gazebo/models:/ardupilot_gazebo/worlds
 
 # `graphics` is required for the EGL headless renderer; `compute` for the
 # CUDA path some Ogre2 components fall through.

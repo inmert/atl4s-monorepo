@@ -8,7 +8,7 @@ Modular ROS 2 platform for drone telemetry and sensor processing. A Jetson Orin 
 Gazebo Harmonic ◀─UDP 9002 (FDM)─▶ ArduCopter (--model JSON) ──TCP 5760──▶ MAVProxy ◀─UDP 14550─▶ MAVROS ──ROS topics──▶ commander, foxglove, …
        │                              (atl4s-sitl)                                                  (atl4s-mavros)
        │
-       └─ camera/IMU/clock ──▶ gz-bridge ──▶ ROS 2 topics (/camera/image, /imu/gazebo, /clock)
+       └─ camera ──▶ gz-bridge ──▶ ROS 2 topics (/camera/image, /camera/camera_info)
 ```
 
 In production, Gazebo + the SITL container are replaced by the Orin Nano forwarding MAVLink (from its real ArduPilot autopilot) and the RealSense + lidar topics over UDP/Zenoh. MAVROS configuration is identical.
@@ -75,7 +75,7 @@ See [HANDOFF.md](HANDOFF.md) for the working context and open items.
 |---|---|---|
 | `sitl` | sim | ArduPilot SITL + MAVProxy. |
 | `gazebo` | sim | Gazebo Harmonic + ArduPilot SITL plugin. Iris with camera/IMU/GPS, headless on L4. |
-| `gz-bridge` | sim | `ros_gz_bridge` mapping Gazebo sensor topics → `/camera/image`, `/camera/camera_info`, `/imu/gazebo`, `/clock`. |
+| `gz-bridge` | sim | `ros_gz_bridge` mapping Gazebo sensor topics → `/camera/image`, `/camera/camera_info`. Sim-only `/imu/gazebo` and `/clock` are intentionally not bridged (no real-drone analog; production IMU is `/mavros/imu/data`). |
 | `mavros` | always | MAVLink ⇄ ROS 2 bridge. |
 | `foxglove` | always | Browser visualization via `foxglove_bridge`, TCP 8765. |
 | `commander` | always | Autonomy node. Low-battery latch → `set_mode RTL`. |

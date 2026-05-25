@@ -1,0 +1,47 @@
+# mavros plugin allowlist for ATL4S.
+#
+# Replaces the upstream /opt/ros/humble/share/mavros/launch/apm_pluginlists.yaml
+# (which uses a small denylist and ends up loading ~60 plugins, publishing
+# ~136 /mavros/* topics). We allow only the plugins whose data we actually
+# consume today or expect to consume for near-term commander work — keeping
+# the topic surface honest about what the production drone produces.
+#
+# Adding a plugin back later is a one-line edit; the canonical plugin names
+# live in /opt/ros/humble/share/mavros{,_extras}/mavros_plugins.xml inside
+# the running container.
+#
+# Required plugins for each downstream service:
+#   commander  → sys_status (state, battery, set_mode)
+#   dashboard  → sys_status, imu, global_position, battery (via sys_status)
+#   foxglove   → opportunistic over any /mavros/* topic the operator opens
+#   future commander behaviors → setpoint_*, waypoint, geofence
+
+/**:
+  ros__parameters:
+    plugin_allowlist:
+      # System + telemetry — the always-on core MAVROS surface.
+      - sys_status            # /mavros/state, /mavros/battery, /mavros/set_mode
+      - sys_time              # /mavros/time_reference, drives tf timestamps
+      - imu                   # /mavros/imu/data, /mavros/imu/data_raw, /mavros/imu/mag
+      - global_position       # /mavros/global_position/* (GPS-derived pose)
+      - local_position        # /mavros/local_position/* (EKF local pose)
+      - home_position         # /mavros/home_position/home
+      - gps_status            # /mavros/gpsstatus/* (satellite count, fix type)
+      - vfr_hud               # /mavros/vfr_hud (airspeed, throttle, climb)
+      - rc_io                 # /mavros/rc/in, /mavros/rc/out
+
+      # Command surface — services downstream services call into.
+      - command               # /mavros/cmd/* (arming, takeoff, land, set_home, …)
+      - param                 # /mavros/param/* (get/set/list)
+
+      # Mission + safety — for upcoming commander behaviors (waypoint loop,
+      # geofence triggers) called out in HANDOFF "Open items".
+      - waypoint              # /mavros/mission/* (the namespace is "mission")
+      - geofence              # /mavros/geofence/*
+
+      # Setpoints — for autonomy nodes that send commands to ArduPilot.
+      - setpoint_position     # /mavros/setpoint_position/*
+      - setpoint_velocity     # /mavros/setpoint_velocity/cmd_vel
+      - setpoint_attitude     # /mavros/setpoint_attitude/*
+      - setpoint_accel        # /mavros/setpoint_accel/accel
+      - setpoint_raw          # /mavros/setpoint_raw/* (low-level passthrough)

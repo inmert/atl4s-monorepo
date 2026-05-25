@@ -27,7 +27,6 @@ Custom message packages (currently `shared/atl4s_msgs/`) are colcon-built into t
 
 `foxglove_bridge` subscribes Reliable + Volatile by default. BE publishers don't match a Reliable sub and get dropped silently. The current entries in [params.yaml](params.yaml) `best_effort_qos_topic_whitelist`:
 
-- `/imu/gazebo`, `/clock` — high-rate gz-bridge topics
 - `/mavros/.*` — most MAVROS publishers are BE
 - `/uas1/.*` — raw MAVLink streams from MAVROS
 - `/lidar/.*`, `/perception/.*`, `/fusion/.*` — perception / fusion services publish BE

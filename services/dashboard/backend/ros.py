@@ -104,7 +104,7 @@ async def sample_socket(ws, topic: str) -> None:
     await ws.accept()
     try:
         # Replay the last known snapshot immediately so the inspector isn't
-        # blank when the topic is low-rate (e.g. /tf_static, /clock at boot).
+        # blank when the topic is low-rate or latched (e.g. /tf_static).
         last = bridge.state.get(topic)
         if last is not None:
             await ws.send_json(last)

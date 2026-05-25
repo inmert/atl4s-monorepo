@@ -1,16 +1,18 @@
-"""HTTP Basic dependency.
+"""HTTP Basic dependency for both HTTP and WebSocket routes.
 
 Reuses ``BAG_WEB_USER`` / ``BAG_WEB_PASS`` so the existing credentials and
-.env entries keep working when bag-web is retired. Fails fast on partial
-config; if both vars are unset, auth is disabled (only safe behind a
-closed firewall).
+.env entries keep working. Fails fast on partial config; if both vars are
+unset, auth is disabled (only safe behind a closed firewall). Browsers
+cache Basic credentials per origin and resend them on WebSocket upgrades,
+so the same realm gates both HTTP and WS routes.
 """
 
+import base64
 import os
 import secrets
 import sys
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, WebSocket, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 USER = os.environ.get('BAG_WEB_USER', '')
@@ -45,3 +47,18 @@ def _noop() -> str:
 
 
 require = _check if ENABLED else _noop
+
+
+def check_websocket(ws: WebSocket) -> bool:
+    """Return True if the WebSocket upgrade carries valid Basic credentials."""
+    if not ENABLED:
+        return True
+    header = ws.headers.get('authorization', '')
+    if not header.lower().startswith('basic '):
+        return False
+    try:
+        decoded = base64.b64decode(header[6:]).decode('utf-8', errors='replace')
+    except Exception:
+        return False
+    user, _, pw = decoded.partition(':')
+    return secrets.compare_digest(user, USER) and secrets.compare_digest(pw, PASS)

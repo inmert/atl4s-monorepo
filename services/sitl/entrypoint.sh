@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Trap signals so both processes shut down cleanly on docker stop.
+trap 'kill $(jobs -p) 2>/dev/null; exit 0' SIGTERM SIGINT
+
 echo "[entrypoint] Starting arducopter..."
 /ardupilot/build/sitl/bin/arducopter \
     --model quad \
@@ -9,16 +12,35 @@ echo "[entrypoint] Starting arducopter..."
     --base-port 5760 \
     &
 
-ARDUPILOT_PID=$!
-echo "[entrypoint] arducopter PID=${ARDUPILOT_PID}"
+ARDU_PID=$!
+echo "[entrypoint] arducopter PID=${ARDU_PID}"
 
-# Wait a couple seconds for arducopter to open TCP 5760 before MAVProxy connects.
-sleep 5
+# Wait for arducopter's TCP master to be ready.
+echo "[entrypoint] Waiting for arducopter TCP 5760..."
+for i in {1..30}; do
+    if (echo > /dev/tcp/127.0.0.1/5760) 2>/dev/null; then
+        echo "[entrypoint] arducopter is listening."
+        break
+    fi
+    sleep 1
+done
 
 echo "[entrypoint] Starting MAVProxy, forwarding to ${MAVPROXY_OUT}..."
-exec mavproxy.py \
+
+# NO --daemon: keep mavproxy in the foreground so the container stays alive.
+# --non-interactive: disable the prompt.
+# --logfile /tmp/mavproxy.log: capture mavproxy's internal logs.
+mavproxy.py \
     --master tcp:127.0.0.1:5760 \
     --out "${MAVPROXY_OUT}" \
-    --daemon \
     --non-interactive \
-    --logfile /tmp/mavproxy.log
+    --logfile /tmp/mavproxy.log &
+
+MAVP_PID=$!
+echo "[entrypoint] MAVProxy PID=${MAVP_PID}"
+
+# Wait on either process; exit if either dies.
+wait -n
+echo "[entrypoint] One process exited. Shutting down."
+kill $(jobs -p) 2>/dev/null || true
+exit 1

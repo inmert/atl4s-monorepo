@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-matplotlib python3-serial python3-scipy \
         build-essential ccache g++ gawk \
         libtool libxml2-dev libxslt1-dev \
-        wget curl rsync sudo procps \
+        wget curl rsync procps \
         tzdata \
     && rm -rf /var/lib/apt/lists/*
 
@@ -31,22 +31,19 @@ RUN pip3 install --no-cache-dir \
 RUN modules/waf/waf-light configure --board sitl \
     && modules/waf/waf-light copter
 
-# Configurable home position via environment.
 ENV SITL_HOME_LAT=37.6213
 ENV SITL_HOME_LON=-122.3790
 ENV SITL_HOME_ALT=5
 ENV SITL_HOME_HEADING=0
 ENV SITL_SPEEDUP=1
 
-# Where MAVProxy fans the MAVLink stream out to.
-# This is what MAVROS listens for on the host (both containers use host networking).
+# MAVProxy `--out` target. Both containers use host networking, so 127.0.0.1
+# resolves to the VM loopback. Use `udp:` (bidirectional) before any service
+# needs to send commands back to the autopilot.
 ENV MAVPROXY_OUT=udpout:127.0.0.1:14550
 
 EXPOSE 5760/tcp 14550/udp
 
-# Entrypoint: start arducopter in the background, then MAVProxy in the foreground.
-# arducopter exposes a master MAVLink stream on TCP 5760 by default.
-# MAVProxy connects there and forwards to the configured UDP endpoint.
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

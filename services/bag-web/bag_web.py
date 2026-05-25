@@ -19,9 +19,7 @@ GCS_BUCKET = os.environ['GCS_BUCKET']
 BAG_WEB_USER = os.environ.get('BAG_WEB_USER', '')
 BAG_WEB_PASS = os.environ.get('BAG_WEB_PASS', '')
 
-# Fail fast on partial config rather than silently running open or rejecting
-# every request. Both unset = explicit "no auth" (only safe behind a closed
-# firewall). Both set = enforce.
+# Fail fast on partial config rather than running half-authenticated.
 if bool(BAG_WEB_USER) != bool(BAG_WEB_PASS):
     print('FATAL: set BOTH BAG_WEB_USER and BAG_WEB_PASS, or neither.', file=sys.stderr)
     sys.exit(1)
@@ -35,7 +33,7 @@ _basic = HTTPBasic(realm='atl4s-bag-web')
 
 
 def require_auth(credentials: HTTPBasicCredentials = Depends(_basic)) -> str:
-    # secrets.compare_digest avoids early-exit timing leaks on the password.
+    # compare_digest avoids early-exit timing leaks.
     user_ok = secrets.compare_digest(credentials.username, BAG_WEB_USER)
     pass_ok = secrets.compare_digest(credentials.password, BAG_WEB_PASS)
     if not (user_ok and pass_ok):
@@ -47,8 +45,6 @@ def require_auth(credentials: HTTPBasicCredentials = Depends(_basic)) -> str:
     return credentials.username
 
 
-# When auth is disabled the dependency is a no-op so handler signatures stay
-# uniform across both modes.
 def _noop() -> str:
     return 'anonymous'
 
@@ -58,7 +54,6 @@ auth_dep = require_auth if AUTH_ENABLED else _noop
 app = FastAPI(title='ATL4S bag-web')
 templates = Jinja2Templates(directory='templates')
 
-# Lazy client init so the app boots even if metadata server is briefly slow.
 _client: storage.Client | None = None
 
 
@@ -70,7 +65,6 @@ def bucket() -> storage.Bucket:
 
 
 def _safe_bag_name(name: str) -> str:
-    """A bag name is a single GCS path segment — no slashes, dots OK."""
     if not name or '/' in name or name in ('.', '..'):
         raise HTTPException(400, 'invalid bag name')
     return name
@@ -78,11 +72,10 @@ def _safe_bag_name(name: str) -> str:
 
 @app.get('/api/bags', dependencies=[Depends(auth_dep)])
 def api_list_bags() -> list[dict]:
-    """One pass over the bucket, aggregate by top-level prefix."""
     bags: dict[str, dict] = defaultdict(lambda: {'size': 0, 'files': 0, 'updated': None})
     for blob in bucket().list_blobs():
         if '/' not in blob.name:
-            continue  # ignore bucket-root files
+            continue  # bucket-root files aren't part of any bag
         prefix = blob.name.split('/', 1)[0]
         b = bags[prefix]
         b['size'] += blob.size or 0
@@ -124,12 +117,10 @@ def api_list_files(bag_name: str) -> list[dict]:
 @app.get('/api/bags/{bag_name}/files/{filename:path}', dependencies=[Depends(auth_dep)])
 def api_download(bag_name: str, filename: str) -> StreamingResponse:
     _safe_bag_name(bag_name)
-    # PurePosixPath collapses ./ and rejects anything escaping the bag prefix.
     rel = PurePosixPath(filename)
     if rel.is_absolute() or '..' in rel.parts:
         raise HTTPException(400, 'invalid filename')
-    # get_blob() returns None on miss and a fully-populated blob (including
-    # size) on hit. blob() alone gives a stub whose .size is None.
+    # get_blob() returns None on miss and populates size; blob() doesn't.
     blob = bucket().get_blob(f'{bag_name}/{rel.as_posix()}')
     if blob is None:
         raise HTTPException(404)
@@ -152,9 +143,9 @@ async def api_upload(bag_name: str, files: list[UploadFile] = File(...)) -> dict
     for f in files:
         if not f.filename:
             continue
-        # FastAPI's UploadFile.file is a SpooledTemporaryFile — already
-        # streamed to disk above ~1MB. upload_from_file iterates it in
-        # chunks, so multi-GB bags don't blow up RAM.
+        # upload_from_file iterates in chunks; combined with UploadFile's
+        # SpooledTemporaryFile (spills to disk over ~1MB) multi-GB bags
+        # stream end-to-end without holding the whole file in RAM.
         blob = bucket().blob(f'{bag_name}/{f.filename}')
         blob.upload_from_file(f.file, rewind=True)
         uploaded.append(f.filename)
@@ -176,7 +167,7 @@ def api_delete(bag_name: str) -> dict:
 
 @app.get('/healthz')
 def healthz() -> dict:
-    # Lightweight liveness — does not hit GCS.
+    # Unauthenticated by design — must not hit GCS so it's safe to call freely.
     return {'status': 'ok', 'bucket': GCS_BUCKET}
 
 

@@ -8,10 +8,9 @@ mkdir -p "${BAG_DIR}"
 NAME="${BAG_NAME:-atl4s-$(date -u +%Y%m%d-%H%M%S)}"
 OUT="${BAG_DIR}/${NAME}"
 
-# Generate a per-topic Best Effort QoS override file. `/mavros/*` publishers
-# offer Best Effort; the default ros2 bag record subscription is Reliable
-# and would silently miss every message. There is no wildcard in the YAML
-# format, so each recorded topic needs its own entry.
+# BE override per topic. ros2 bag record subscribes Reliable by default
+# and would silently miss every Best Effort publisher (most of /mavros/*).
+# The YAML format takes `topic: <dict>`, not a list — no wildcards either.
 QOS_FILE="/tmp/qos-overrides.yaml"
 : > "${QOS_FILE}"
 for topic in ${RECORD_TOPICS}; do
@@ -27,9 +26,8 @@ done
 echo "[entrypoint] Recording to ${OUT}"
 echo "[entrypoint] Topics: ${RECORD_TOPICS}"
 
-# exec so SIGTERM (docker stop) reaches ros2 bag record directly, which
-# closes the bag cleanly. A bash wrapper would catch the signal first and
-# leave the bag mid-write.
+# exec, not run-and-wait: keeps ros2 bag record as PID 1 so SIGTERM from
+# `docker stop` closes the bag cleanly instead of cutting it mid-write.
 exec ros2 bag record \
     --output "${OUT}" \
     --storage mcap \

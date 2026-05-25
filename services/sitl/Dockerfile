@@ -43,9 +43,8 @@ ENV MAVPROXY_OUT=udp:127.0.0.1:14550
 
 EXPOSE 5760/tcp 14550/udp
 
-# MAVProxy `--streamrate` (Hz). MAVProxy requests data streams from ArduPilot
-# via MAV_CMD_REQUEST_DATA_STREAM at this rate. Drives /mavros/* topic rates.
-# Higher = richer telemetry but more MAVLink bandwidth + load on the FDM loop.
+# Drives /mavros/* topic rates via MAV_CMD_REQUEST_DATA_STREAM. ArduPilot
+# rate-limits below the request — observed ~5 Hz at streamrate=10.
 ENV MAVPROXY_STREAMRATE=10
 
 COPY entrypoint.sh /entrypoint.sh

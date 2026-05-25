@@ -5,8 +5,8 @@ set -e
 trap 'kill $(jobs -p) 2>/dev/null; exit 0' SIGTERM SIGINT
 
 echo "[entrypoint] Starting arducopter (model=JSON, FDM via Gazebo on UDP :9002)..."
-# --model JSON: take physics from the external Gazebo ardupilot_gazebo plugin.
-# Speedup is omitted on purpose — Gazebo's real_time_factor controls sim time.
+# --model JSON delegates physics to the ardupilot_gazebo plugin. SITL_SPEEDUP
+# is intentionally ignored — Gazebo's real_time_factor controls sim time.
 /ardupilot/build/sitl/bin/arducopter \
     --model JSON \
     --defaults /ardupilot/Tools/autotest/default_params/copter.parm,/ardupilot/Tools/autotest/default_params/gazebo-iris.parm \
@@ -24,12 +24,10 @@ for i in {1..30}; do
 done
 
 echo "[entrypoint] Starting MAVProxy (streamrate=${MAVPROXY_STREAMRATE} Hz), forwarding to ${MAVPROXY_OUT}..."
-# Foreground, NOT --daemon — otherwise mavproxy double-forks, PID 1 exits,
-# and the container restart-loops.
-# --streamrate: rate MAVProxy requests SERIAL0 streams from ArduPilot via
-# MAV_CMD_REQUEST_DATA_STREAM. Drives /mavros/* topic rates downstream.
-# (ArduPilot 4.8 dropped the per-channel SR0_* params for SERIAL0 — the
-# stream-rate path now goes through this CLI flag instead.)
+# Foreground (no --daemon): mavproxy double-forks under --daemon, PID 1
+# exits, and the container restart-loops.
+# --streamrate drives /mavros/* topic rates; see HANDOFF "MAVProxy stream
+# rate" for why this is the only knob in ArduCopter 4.8.
 mavproxy.py \
     --master tcp:127.0.0.1:5760 \
     --out "${MAVPROXY_OUT}" \
@@ -37,7 +35,7 @@ mavproxy.py \
     --non-interactive \
     --logfile /tmp/mavproxy.log &
 
-# Exit if either process dies so the supervisor restarts the whole unit.
+# Exit if either process dies so Docker restarts the whole container.
 wait -n
 echo "[entrypoint] One process exited. Shutting down."
 kill $(jobs -p) 2>/dev/null || true

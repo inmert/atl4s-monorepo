@@ -19,9 +19,7 @@ RUN wget -q https://raw.githubusercontent.com/mavlink/mavros/ros2/mavros/scripts
     && bash install_geographiclib_datasets.sh \
     && rm install_geographiclib_datasets.sh
 
-# URL format: udp://[bind][:port]@[remote][:port]. `udp://:14550@` binds on
-# 0.0.0.0:14550, no remote. `udp://@:14550` would bind the default port 14555
-# and treat :14550 as the remote — silently breaks ingestion.
+# udp://[bind]@[remote] — bind side before the @. See README for the gotcha.
 ENV FCU_URL="udp://:14550@"
 ENV GCS_URL=""
 

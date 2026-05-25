@@ -34,9 +34,8 @@ class TopicTrack:
     extra: str = ''
 
 
-# Single source of truth for what we monitor. Required topics fail the check
-# if stale; optional ones (sim-only) WARN instead, so prod runs without the
-# sim profile still report OK overall.
+# Optional topics WARN instead of ERROR when stale, so prod runs without
+# the sim profile (no /imu/gazebo, /clock, /camera/image) stay OK overall.
 def tracked_defaults() -> list[TopicTrack]:
     return [
         TopicTrack('/mavros/state',                  MavrosState,  5.0,  True),
@@ -73,7 +72,8 @@ class Healthcheck(Node):
 
         qos = best_effort_qos()
         for t in self.topics.values():
-            # default arg pins `name` per loop iteration (no closure trap).
+            # `name=t.name` binds the value per iteration; bare `t.name` in
+            # the lambda would close over the loop variable.
             self.create_subscription(
                 t.msg_type, t.name,
                 lambda msg, name=t.name: self.on_msg(name, msg),
@@ -100,8 +100,6 @@ class Healthcheck(Node):
                 t.extra = 'connected' if msg.connected else 'disconnected'
 
     def evaluate(self):
-        """Return (overall_level, per-topic dicts). overall_level is the
-        DiagnosticStatus.{OK,WARN,ERROR} byte constant (bytes in rclpy)."""
         now = time.monotonic()
         per_topic: list[dict] = []
         overall = DiagnosticStatus.OK
@@ -214,9 +212,8 @@ def _rolling_rate(window: deque, now: float, max_stale_s: float) -> float:
     return (len(window) - 1) / span if span > 0 else 0.0
 
 
-# DiagnosticStatus.{OK,WARN,ERROR,STALE} are 1-byte bytes objects in rclpy
-# (b'\x00' .. b'\x03'). Keep both maps keyed on the same bytes form so no
-# conversion is needed at lookup time.
+# DiagnosticStatus.{OK,WARN,ERROR,STALE} are bytes in rclpy (b'\x00' ..),
+# so the lookup keys here are bytes too — no conversion needed.
 _LEVEL_NAMES = {
     DiagnosticStatus.OK: 'OK',
     DiagnosticStatus.WARN: 'WARN',

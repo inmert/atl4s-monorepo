@@ -115,9 +115,7 @@ services:
       - mavros
 
   bag-web:
-    # Non-ROS service (FastAPI + GCS), but keeping the x-common base for the
-    # restart policy + host networking. The fastdds_profiles bind-mount is
-    # harmless here; uses the GCE metadata server for GCS auth like uploader.
+    # Non-ROS; uses x-common only for restart policy + host networking.
     <<: *common
     build:
       context: ./services/bag-web

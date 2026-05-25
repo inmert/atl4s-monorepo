@@ -5,15 +5,26 @@ import {
   Archive,
   Bot,
   Cpu,
+  Disc,
   ExternalLink,
+  Play,
 } from 'lucide-react';
 import { useTopics } from '../lib/topics';
 import { useHealth } from '../lib/health';
-import { api, type Bag, type Robot } from '../lib/api';
+import {
+  api,
+  type Bag,
+  type Pipeline,
+  type RecordStatus,
+  type ReplayStatus,
+  type Robot,
+} from '../lib/api';
 import { foxgloveStudioUrl } from '../lib/foxglove';
 import { formatBytes, formatDate } from '../lib/format';
 import { iconFor, isOnline, summarize } from '../lib/robots';
 import { Badge, Card, PageHeader, StatTile, StatusDot } from '../lib/components';
+
+const POLL_MS = 3000;
 
 export function Home() {
   const { topics } = useTopics();
@@ -21,23 +32,54 @@ export function Home() {
 
   const [robots, setRobots] = useState<Robot[] | null>(null);
   const [bags, setBags] = useState<Bag[] | null>(null);
+  const [pipelines, setPipelines] = useState<Pipeline[] | null>(null);
+  const [recordStatus, setRecordStatus] = useState<RecordStatus | null>(null);
+  const [replayStatus, setReplayStatus] = useState<ReplayStatus | null>(null);
 
+  // One initial fetch for the (rarely-changing) registries; one polled fetch
+  // for the things that update during a session (record/replay state + bag
+  // list since recordings land there).
   useEffect(() => {
     api.listRobots().then(setRobots).catch(() => setRobots([]));
-    api.listBags().then(setBags).catch(() => setBags([]));
+    api.listPipelines().then(setPipelines).catch(() => setPipelines([]));
   }, []);
 
-  // Aggregate telemetry across all online robots: prefer the first online one
-  // for the headline stat tiles. Keeps Home useful with just one robot but
-  // doesn't break with many.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const [b, rs, ps] = await Promise.all([
+          api.listBags(),
+          api.recordStatus(),
+          api.replayStatus(),
+        ]);
+        if (cancelled) return;
+        setBags(b);
+        setRecordStatus(rs);
+        setReplayStatus(ps);
+      } catch {
+        if (!cancelled && bags === null) setBags([]);
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Headline tiles take from the first online robot (single-drone case stays
+  // useful; multi-robot picks the first that's actually live).
   const primaryRobot = (robots || []).find((r) => isOnline(r, topics));
   const state = primaryRobot?.telemetry.state ? topics[primaryRobot.telemetry.state]?.data : undefined;
   const battery = primaryRobot?.telemetry.battery ? topics[primaryRobot.telemetry.battery]?.data : undefined;
 
-  // Pipelines: count discovered perception / fusion outputs
-  const perceptionTopics = Object.values(topics).filter(
-    (t) => t.topic.startsWith('/perception/') || t.topic.startsWith('/fusion/'),
-  );
+  const recording = recordStatus?.state === 'recording';
+  const replayBusy = replayStatus && replayStatus.state !== 'idle';
+
+  const runningPipelines = (pipelines || []).filter((p) => p.status.state === 'running');
 
   const recentBags = (bags || []).slice(0, 4);
   const totalBytes = (bags || []).reduce((sum, b) => sum + b.size_bytes, 0);
@@ -59,6 +101,8 @@ export function Home() {
         }
       />
 
+      <ActiveBanner recordStatus={recordStatus} replayStatus={replayStatus} />
+
       <div className="stat-grid">
         <StatTile
           label={primaryRobot ? `${primaryRobot.name} · Battery` : 'Battery'}
@@ -73,7 +117,10 @@ export function Home() {
           value={state?.mode || '—'}
           tone={state?.armed ? 'warn' : undefined}
         />
-        <StatTile label="Topics seen" value={Object.keys(topics).length} />
+        <StatTile
+          label="Pipelines running"
+          value={pipelines === null ? '—' : `${runningPipelines.length} / ${pipelines.length}`}
+        />
       </div>
 
       <div className="grid grid-2" style={{ marginBottom: 20 }}>
@@ -85,8 +132,7 @@ export function Home() {
             <p className="placeholder">Loading…</p>
           ) : robots.length === 0 ? (
             <p className="placeholder">
-              No robots configured. Edit{' '}
-              <code>services/dashboard/config/robots.yaml</code>.
+              No robots configured. Edit <code>config/robots.yaml</code>.
             </p>
           ) : (
             <div className="stack" style={{ gap: 10 }}>
@@ -94,20 +140,7 @@ export function Home() {
                 const Icon = iconFor(r.icon);
                 const online = isOnline(r, topics);
                 return (
-                  <Link
-                    key={r.id}
-                    to={`/robots/${r.id}`}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 12,
-                      padding: '10px 12px',
-                      borderRadius: 10,
-                      background: 'var(--surface-2)',
-                      color: 'var(--label)',
-                      textDecoration: 'none',
-                    }}
-                  >
+                  <Link key={r.id} to={`/robots/${r.id}`} className="home-row">
                     <Icon size={20} style={{ opacity: 0.85, flex: 'none' }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 600 }}>{r.name}</div>
@@ -152,20 +185,31 @@ export function Home() {
           title="Pipelines"
           right={<Link to="/pipelines" className="dim">Configure →</Link>}
         >
-          {perceptionTopics.length === 0 ? (
+          {pipelines === null ? (
+            <p className="placeholder">Loading…</p>
+          ) : pipelines.length === 0 ? (
             <p className="placeholder">
-              No <code>/perception/*</code> or <code>/fusion/*</code> outputs yet. Start
-              a perception service to see its topics here.
+              No pipelines configured. Edit <code>config/pipelines.yaml</code>.
             </p>
           ) : (
-            <div className="stack" style={{ gap: 6 }}>
-              {perceptionTopics.slice(0, 4).map((t) => (
-                <div key={t.topic} className="row space" style={{ fontSize: 13 }}>
-                  <code style={{ color: 'var(--label-2)' }}>{t.topic}</code>
-                  <span className="dim mono" style={{ fontSize: 12 }}>
-                    {t.rate.toFixed(1)} Hz
-                  </span>
-                </div>
+            <div className="stack" style={{ gap: 8 }}>
+              {pipelines.map((p) => (
+                <Link key={p.id} to="/pipelines" className="home-row">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600 }}>{p.name}</div>
+                    <div className="dim" style={{ fontSize: 12 }}>
+                      {p.input_topics[0] || '—'} → {p.output_topics[0] || '—'}
+                    </div>
+                  </div>
+                  <Badge tone={p.status.level}>
+                    <StatusDot tone={p.status.level} />
+                    {p.status.state === 'running'
+                      ? 'Running'
+                      : p.status.state === 'absent'
+                        ? 'Not deployed'
+                        : p.status.state}
+                  </Badge>
+                </Link>
               ))}
             </div>
           )}
@@ -185,6 +229,8 @@ export function Home() {
             <div className="stack" style={{ gap: 8 }}>
               <div className="dim" style={{ fontSize: 12 }}>
                 {bags.length} bag{bags.length === 1 ? '' : 's'} · {formatBytes(totalBytes)} total
+                {recording && ' · 1 recording'}
+                {replayBusy && ' · 1 replaying'}
               </div>
               {recentBags.map((b) => (
                 <div key={b.name} className="row space" style={{ fontSize: 13 }}>
@@ -217,6 +263,44 @@ export function Home() {
   );
 }
 
+function ActiveBanner({
+  recordStatus,
+  replayStatus,
+}: {
+  recordStatus: RecordStatus | null;
+  replayStatus: ReplayStatus | null;
+}) {
+  const recording = recordStatus?.state === 'recording' || recordStatus?.state === 'stopping';
+  const replayBusy = replayStatus && replayStatus.state !== 'idle';
+  if (!recording && !replayBusy) return null;
+  return (
+    <div className="row" style={{ gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+      {recording && (
+        <Link to="/rosbags" className="active-pill rec">
+          <Disc size={13} />
+          <span>
+            {recordStatus?.state === 'stopping' ? 'Stopping recording' : 'Recording'}
+            {recordStatus?.name ? ` — ${recordStatus.name}` : ''}
+          </span>
+        </Link>
+      )}
+      {replayBusy && (
+        <Link to="/rosbags" className="active-pill rep">
+          <Play size={13} />
+          <span>
+            {replayStatus?.state === 'downloading'
+              ? 'Downloading'
+              : replayStatus?.state === 'stopping'
+                ? 'Stopping replay'
+                : 'Replaying'}
+            {replayStatus?.bag ? ` — ${replayStatus.bag}` : ''}
+          </span>
+        </Link>
+      )}
+    </div>
+  );
+}
+
 function QuickLink({
   to,
   icon: Icon,
@@ -229,21 +313,7 @@ function QuickLink({
   hint: string;
 }) {
   return (
-    <Link
-      to={to}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 14,
-        padding: 16,
-        borderRadius: 'var(--radius-lg)',
-        background: 'var(--surface)',
-        boxShadow: 'var(--shadow-1)',
-        color: 'var(--label)',
-        textDecoration: 'none',
-        transition: 'transform 0.12s var(--ease), background 0.12s var(--ease)',
-      }}
-    >
+    <Link to={to} className="quick-link">
       <Icon size={22} style={{ color: 'var(--accent)', flex: 'none' }} />
       <div style={{ minWidth: 0 }}>
         <div style={{ fontWeight: 600, fontSize: 14 }}>{title}</div>

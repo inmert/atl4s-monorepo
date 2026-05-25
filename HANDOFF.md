@@ -140,6 +140,14 @@ diff <(docker exec atl4s-sitl cat /entrypoint.sh) services/sitl/entrypoint.sh
 
 Shared env vars live under `x-shared-env: &shared-env` as a **map**, merged into each service's `environment:` (also a map) via `<<: *shared-env`. List-style `environment:` would silently replace the parent's value — this is YAML's documented behavior, not a Compose bug. Keep the map form when adding shared env vars.
 
+### FastDDS shared-memory transport across containers
+
+FastDDS (the Humble default RMW) prefers shared memory for data delivery when both endpoints look local. Containers with `network_mode: host` share the network namespace but **not** `/dev/shm`, so DDS discovery (UDP multicast) works while data sent over the SHM locator is silently dropped. Symptom: a subscriber sees the topic in `ros2 topic list` and `ros2 topic info -v` shows it as a matching endpoint, but no messages arrive.
+
+Fix in this repo: every ROS container mounts `shared/fastdds_profiles.xml` at `/fastdds_profiles.xml` and sets `FASTRTPS_DEFAULT_PROFILES_FILE` to point at it (both wired in `docker-compose.yml` under `x-common` / `x-shared-env`). The profile disables built-in transports and re-enables UDPv4 only.
+
+Side effect: tools running on the **host** (`ros2 topic echo` from a host shell) need the same env var set to see container topics — they have their own `/dev/shm` too. Either `export FASTRTPS_DEFAULT_PROFILES_FILE=$PWD/shared/fastdds_profiles.xml` or run diagnostics inside a container.
+
 ### DDS implementation
 
 Both images use the ROS 2 default RMW (FastRTPS). Sufficient for single-host. Multi-host with the Orin Nano may benefit from CycloneDDS for tunable QoS / discovery — install `ros-humble-rmw-cyclonedds-cpp` in both images and set `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` in `x-shared-env` when the time comes.

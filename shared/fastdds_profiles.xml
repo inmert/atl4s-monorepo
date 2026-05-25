@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  FastDDS profile for ATL4S containers.
+
+  Disables the built-in shared-memory transport and forces UDPv4 only.
+
+  Without this, FastDDS prefers SHM whenever it appears available, but our
+  ROS services run in separate Docker containers that do not share /dev/shm.
+  DDS discovery (UDP multicast) succeeds, so topic enumeration works — but
+  message data routed over the SHM locator is silently dropped, producing
+  the symptom "subscriber sees the topic but never receives a message."
+
+  Loaded via FASTRTPS_DEFAULT_PROFILES_FILE in docker-compose.yml.
+-->
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+
+  <transport_descriptors>
+    <transport_descriptor>
+      <transport_id>udp_transport</transport_id>
+      <type>UDPv4</type>
+    </transport_descriptor>
+  </transport_descriptors>
+
+  <participant profile_name="participant_default" is_default_profile="true">
+    <rtps>
+      <userTransports>
+        <transport_id>udp_transport</transport_id>
+      </userTransports>
+      <useBuiltinTransports>false</useBuiltinTransports>
+    </rtps>
+  </participant>
+
+</profiles>

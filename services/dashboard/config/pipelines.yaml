@@ -28,7 +28,7 @@
 
 - id: perception-lidar
   name: Lidar Perception
-  description: Detect aircraft and tank-class targets from lidar point clouds.
+  description: Detect aircraft and tank-class targets from 3D point clouds or 2D laser scans.
   kind: perception
   icon: target
   container: atl4s-perception-lidar
@@ -36,6 +36,7 @@
     - /lidar/points
   output_topics:
     - /perception/lidar/detections
+    - /perception/lidar/markers
   config_schema:
     - name: model_variant
       label: Model variant
@@ -53,6 +54,11 @@
       label: Target classes
       type: list_string
       default: [aircraft, tank]
+    - name: input_type
+      label: Input modality
+      type: select
+      options: [pointcloud2, laserscan]
+      default: pointcloud2
     - name: input_topic
       label: Input topic
       type: string
@@ -61,6 +67,10 @@
       label: Output topic
       type: string
       default: /perception/lidar/detections
+    - name: marker_topic
+      label: Marker topic (Foxglove 3D viz)
+      type: string
+      default: /perception/lidar/markers
     - name: enable_tracking
       label: Enable tracking
       type: boolean

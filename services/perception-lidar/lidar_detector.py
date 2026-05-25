@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
-"""perception-lidar — subscribes to a PointCloud2 input and publishes
-``atl4s_msgs/LidarDetectionArray`` of clustered objects.
+"""perception-lidar — subscribes to a lidar input topic (PointCloud2 for
+3D lidars, LaserScan for planar 2D lidars) and publishes
+``atl4s_msgs/LidarDetectionArray`` of clustered objects plus
+``visualization_msgs/MarkerArray`` so Foxglove Studio's 3D panel can
+render the boxes directly.
 
 The detector is a classical scaffold: DBSCAN cluster the (above-ground,
 within-range) points, compute each cluster's axis-aligned bounding box,
@@ -35,11 +38,12 @@ from rclpy.qos import (
     QoSProfile,
     QoSReliabilityPolicy,
 )
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import LaserScan, PointCloud2
 from sensor_msgs_py import point_cloud2
 from sklearn.cluster import DBSCAN
-from std_msgs.msg import Header
+from std_msgs.msg import ColorRGBA, Header
 from geometry_msgs.msg import Point, Vector3
+from visualization_msgs.msg import Marker, MarkerArray
 
 from atl4s_msgs.msg import LidarDetection, LidarDetectionArray
 
@@ -79,6 +83,14 @@ PROTOTYPES: dict[str, ShapePrior] = {
     ),
 }
 
+# Marker palette for Foxglove rendering. Falls back to grey for any class
+# not listed here (typically 'other' if it ever sneaks past target_classes).
+CLASS_COLORS: dict[str, tuple[float, float, float, float]] = {
+    'aircraft': (1.0, 0.7, 0.1, 0.85),  # warm orange
+    'tank':     (1.0, 0.25, 0.25, 0.85),  # red
+}
+DEFAULT_COLOR = (0.5, 0.5, 0.5, 0.7)
+
 
 # ─── Config ────────────────────────────────────────────────────────────
 
@@ -90,8 +102,10 @@ class Config:
     model_variant: str
     confidence_threshold: float
     target_classes: list[str]
+    input_type: str          # 'pointcloud2' (3D) or 'laserscan' (2D planar)
     input_topic: str
     output_topic: str
+    marker_topic: str
     enable_tracking: bool
 
 
@@ -99,10 +113,15 @@ CONFIG_DEFAULTS = Config(
     model_variant='pointpillars',
     confidence_threshold=0.5,
     target_classes=['aircraft', 'tank'],
+    input_type='pointcloud2',
     input_topic='/lidar/points',
     output_topic='/perception/lidar/detections',
+    marker_topic='/perception/lidar/markers',
     enable_tracking=False,
 )
+
+
+VALID_INPUT_TYPES = ('pointcloud2', 'laserscan')
 
 
 def load_config(path: Path = CONFIG_PATH, log: Optional[logging.Logger] = None) -> Config:
@@ -113,12 +132,21 @@ def load_config(path: Path = CONFIG_PATH, log: Optional[logging.Logger] = None) 
     with path.open() as f:
         raw = yaml.safe_load(f) or {}
     cls = list(raw.get('target_classes') or CONFIG_DEFAULTS.target_classes)
+    input_type = str(raw.get('input_type', CONFIG_DEFAULTS.input_type)).lower()
+    if input_type not in VALID_INPUT_TYPES:
+        if log:
+            log.warning(
+                'unknown input_type=%r; falling back to %s', input_type, CONFIG_DEFAULTS.input_type
+            )
+        input_type = CONFIG_DEFAULTS.input_type
     return Config(
         model_variant=str(raw.get('model_variant', CONFIG_DEFAULTS.model_variant)),
         confidence_threshold=float(raw.get('confidence_threshold', CONFIG_DEFAULTS.confidence_threshold)),
         target_classes=[str(c) for c in cls],
+        input_type=input_type,
         input_topic=str(raw.get('input_topic', CONFIG_DEFAULTS.input_topic)),
         output_topic=str(raw.get('output_topic', CONFIG_DEFAULTS.output_topic)),
+        marker_topic=str(raw.get('marker_topic', CONFIG_DEFAULTS.marker_topic)),
         enable_tracking=bool(raw.get('enable_tracking', CONFIG_DEFAULTS.enable_tracking)),
     )
 
@@ -153,15 +181,23 @@ def _classify(bbox: ShapePrior_like, score_above: float) -> tuple[str, float]:
 
 
 def _score(bbox: ShapePrior_like, prior: ShapePrior) -> float:
-    """Geometric mean of per-axis fit scores. Returns 0.0..1.0."""
+    """Geometric mean of per-axis fit scores. Returns 0.0..1.0.
+
+    Height contributes only when the input has a real z extent; 2D
+    LaserScans set every point to z=0 by construction, so height-based
+    scoring would force every detection's score to ~0. In that case the
+    aspect ratio and footprint dimensions carry the discrimination on
+    their own.
+    """
     if bbox.width <= 0:
         return 0.0
     parts = [
         _within(bbox.length, prior.length),
         _within(bbox.width, prior.width),
-        _within(bbox.height, prior.height),
         _within(bbox.length / max(bbox.width, 0.01), prior.length_over_width),
     ]
+    if bbox.height > 0:
+        parts.append(_within(bbox.height, prior.height))
     # Geometric mean — one bad axis dominates, mirroring "all dimensions
     # must look right" rather than "any one will do".
     prod = 1.0
@@ -225,6 +261,7 @@ class LidarDetector(Node):
 
         self.get_logger().info(
             f'config: model_variant={cfg.model_variant}, '
+            f'input_type={cfg.input_type}, '
             f'confidence>={cfg.confidence_threshold}, '
             f'targets={cfg.target_classes}, '
             f'tracking={"on" if cfg.enable_tracking else "off"}'
@@ -238,29 +275,34 @@ class LidarDetector(Node):
         if cfg.enable_tracking:
             self.get_logger().warn('enable_tracking=true requested, but tracking is not implemented yet; track_id will be 0')
 
-        self.sub = self.create_subscription(
-            PointCloud2, cfg.input_topic, self._on_cloud, _be_qos()
-        )
+        # Subscription type follows the configured input modality. The
+        # downstream processing (DBSCAN → AABB → score → publish) is shared
+        # between the two; the only difference is how we get N×3 points
+        # from the incoming message.
+        if cfg.input_type == 'laserscan':
+            self.sub = self.create_subscription(
+                LaserScan, cfg.input_topic, self._on_scan, _be_qos()
+            )
+        else:
+            self.sub = self.create_subscription(
+                PointCloud2, cfg.input_topic, self._on_cloud, _be_qos()
+            )
         self.pub = self.create_publisher(
             LidarDetectionArray, cfg.output_topic, _be_qos()
         )
+        # Foxglove Studio's 3D panel renders MarkerArray natively, so a
+        # parallel marker stream gives an instant live visualisation
+        # without a custom Studio panel.
+        self.marker_pub = self.create_publisher(
+            MarkerArray, cfg.marker_topic, _be_qos()
+        )
         self.get_logger().info(
-            f'subscribed to {cfg.input_topic}; publishing to {cfg.output_topic}'
+            f'subscribed to {cfg.input_topic} ({cfg.input_type}); '
+            f'publishing detections to {cfg.output_topic} '
+            f'and markers to {cfg.marker_topic}'
         )
 
     def _on_cloud(self, msg: PointCloud2) -> None:
-        try:
-            detections = self._detect(msg)
-        except Exception:
-            self.get_logger().exception('detection failed; dropping frame')
-            return
-
-        out = LidarDetectionArray()
-        out.header = msg.header
-        out.detections = detections
-        self.pub.publish(out)
-
-    def _detect(self, msg: PointCloud2) -> list[LidarDetection]:
         # read_points returns a structured numpy array; project to N×3.
         raw = point_cloud2.read_points(
             msg, field_names=('x', 'y', 'z'), skip_nans=True
@@ -273,11 +315,45 @@ class LidarDetector(Node):
             xyz = np.asarray(list(raw), dtype=np.float32)
             if xyz.ndim == 1 and xyz.size:
                 xyz = xyz.reshape(-1, 3)
+        self._process(xyz, msg.header)
 
+    def _on_scan(self, msg: LaserScan) -> None:
+        # LaserScan → N×3 with z=0. Invalid returns (inf/NaN/out-of-range)
+        # are filtered before projection so DBSCAN doesn't see them.
+        n = len(msg.ranges)
+        if n == 0:
+            return
+        angles = msg.angle_min + np.arange(n, dtype=np.float32) * msg.angle_increment
+        ranges = np.asarray(msg.ranges, dtype=np.float32)
+        valid = np.isfinite(ranges) & (ranges >= msg.range_min) & (ranges <= msg.range_max)
+        if not np.any(valid):
+            return
+        xs = ranges[valid] * np.cos(angles[valid])
+        ys = ranges[valid] * np.sin(angles[valid])
+        zs = np.zeros_like(xs)
+        xyz = np.column_stack([xs, ys, zs])
+        self._process(xyz, msg.header)
+
+    def _process(self, xyz: np.ndarray, header: Header) -> None:
+        try:
+            detections = self._detect_from_xyz(xyz, header)
+        except Exception:
+            self.get_logger().exception('detection failed; dropping frame')
+            return
+
+        out = LidarDetectionArray()
+        out.header = header
+        out.detections = detections
+        self.pub.publish(out)
+        self.marker_pub.publish(self._to_markers(detections, header))
+
+    def _detect_from_xyz(self, xyz: np.ndarray, header: Header) -> list[LidarDetection]:
         if xyz.size == 0:
             return []
 
-        # Ground + range filter.
+        # Ground + range filter. The ground filter is a no-op for 2D
+        # LaserScans (all z=0 > GROUND_Z_THRESHOLD=-1.0); the range filter
+        # still rejects far returns.
         above_ground = xyz[:, 2] > GROUND_Z_THRESHOLD
         in_range = np.linalg.norm(xyz[:, :2], axis=1) < MAX_RANGE_M
         xyz = xyz[above_ground & in_range]
@@ -301,14 +377,70 @@ class LidarDetector(Node):
 
             det = LidarDetection()
             det.header = Header()
-            det.header.stamp = msg.header.stamp
-            det.header.frame_id = msg.header.frame_id
+            det.header.stamp = header.stamp
+            det.header.frame_id = header.frame_id
             det.class_id = label
             det.score = float(score)
             det.center = Point(x=bbox.cx, y=bbox.cy, z=bbox.cz)
             det.size = Vector3(x=bbox.length, y=bbox.width, z=bbox.height)
             det.track_id = 0
             out.append(det)
+        return out
+
+    def _to_markers(self, detections: list[LidarDetection], header: Header) -> MarkerArray:
+        """Render the current frame as a MarkerArray for Foxglove's 3D panel.
+
+        First entry is a DELETEALL so the previous frame's markers don't
+        linger when this frame has fewer detections. Each surviving
+        detection becomes one CUBE + one TEXT marker labelled with the
+        class id and score. Marker IDs are stable within a frame; the
+        DELETEALL guarantees correctness across frames.
+        """
+        markers: list[Marker] = []
+
+        clear = Marker()
+        clear.header = header
+        clear.action = Marker.DELETEALL
+        markers.append(clear)
+
+        for i, det in enumerate(detections):
+            r, g, b, a = CLASS_COLORS.get(det.class_id, DEFAULT_COLOR)
+            color = ColorRGBA(r=r, g=g, b=b, a=a)
+
+            cube = Marker()
+            cube.header = header
+            cube.ns = 'detections'
+            cube.id = i
+            cube.type = Marker.CUBE
+            cube.action = Marker.ADD
+            cube.pose.position = det.center
+            cube.pose.orientation.w = 1.0
+            # Minimum scale of 0.05 m so a degenerate (zero-extent on one
+            # axis, e.g. 2D scan height) cube still renders as a thin slab
+            # rather than disappearing.
+            cube.scale.x = max(float(det.size.x), 0.05)
+            cube.scale.y = max(float(det.size.y), 0.05)
+            cube.scale.z = max(float(det.size.z), 0.05)
+            cube.color = color
+            markers.append(cube)
+
+            text = Marker()
+            text.header = header
+            text.ns = 'detections_label'
+            text.id = i
+            text.type = Marker.TEXT_VIEW_FACING
+            text.action = Marker.ADD
+            text.pose.position.x = float(det.center.x)
+            text.pose.position.y = float(det.center.y)
+            text.pose.position.z = float(det.center.z) + max(float(det.size.z), 0.05) / 2 + 0.5
+            text.pose.orientation.w = 1.0
+            text.scale.z = 1.0  # text height in metres
+            text.color = ColorRGBA(r=1.0, g=1.0, b=1.0, a=1.0)
+            text.text = f'{det.class_id} {det.score:.2f}'
+            markers.append(text)
+
+        out = MarkerArray()
+        out.markers = markers
         return out
 
 

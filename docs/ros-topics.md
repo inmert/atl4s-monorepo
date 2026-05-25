@@ -41,8 +41,10 @@ There is no dedicated health topic. The dashboard owns health: per-container sta
 
 | Topic | Type | Direction | Description |
 |---|---|---|---|
-| `/lidar/points` | `sensor_msgs/PointCloud2` | in | Lidar input. No live source on the VM today; use `scripts/publish-fake-lidar.sh` to drive synthetic frames at 5 Hz. Real source will come from the Orin via the future `ingestion` service. |
-| `/perception/lidar/detections` | `atl4s_msgs/LidarDetectionArray` | out | Per-frame detections. Each `LidarDetection` carries `class_id` (e.g. "aircraft", "tank", "other"), `score` (0..1), `center` (Point), `size` (Vector3 = length / width / height), `track_id` (int32, 0 when tracking is off). Header frame matches the input cloud's frame. |
+| `/lidar/points` | `sensor_msgs/PointCloud2` | in | 3D lidar input. Active when `input_type: pointcloud2` (default). No live source on the VM today; `scripts/publish-fake-lidar.sh` drives synthetic frames at 5 Hz. Real source will come from the Orin via the future `ingestion` service. |
+| `/lidar/scan` | `sensor_msgs/LaserScan` | in | 2D planar lidar input. Active when `input_type: laserscan`. `scripts/publish-fake-scan.sh` drives a synthetic 720-ray 360° scan at 5 Hz. |
+| `/perception/lidar/detections` | `atl4s_msgs/LidarDetectionArray` | out | Per-frame detections. Each `LidarDetection` carries `class_id` (e.g. "aircraft", "tank", "other"), `score` (0..1), `center` (Point), `size` (Vector3 = length / width / height), `track_id` (int32, 0 when tracking is off). Header frame matches the input message's frame. For 2D LaserScan inputs, `size.z` is always 0. |
+| `/perception/lidar/markers` | `visualization_msgs/MarkerArray` | out | Foxglove-ready visualisation of the same detections. Each frame begins with a `DELETEALL` marker (so old detections don't linger), followed by one `CUBE` and one `TEXT_VIEW_FACING` marker per surviving detection. Class is colour-coded (aircraft = orange, tank = red, other = grey). Marker frame matches the detection frame. |
 
 Configured + lifecycle-controlled from the dashboard Pipelines page. Runtime config lives at `services/dashboard/config/pipelines/perception-lidar.yaml`.
 

@@ -29,7 +29,7 @@ atl4s-monorepo/
 │   ├── mavros/               MAVLink ⇄ ROS 2 bridge
 │   ├── foxglove/             ROS 2 topics → WebSocket on TCP 8765
 │   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
-│   ├── perception-lidar/     DBSCAN lidar detector; publishes /perception/lidar/detections
+│   ├── perception-lidar/     DBSCAN lidar detector (3D PointCloud2 or 2D LaserScan input); publishes /perception/lidar/detections + /perception/lidar/markers
 │   ├── dashboard/            Operator UI: home, robots, pipelines, rosbags, ROS, health (HTTP Basic, TCP 8089)
 │   └── rosbag-manager/       HTTP API for bag-plane ops: record / upload / GCS browser / replay (loopback 127.0.0.1:8086)
 ├── shared/
@@ -37,7 +37,8 @@ atl4s-monorepo/
 │   └── atl4s_msgs/           ament_cmake message package (LidarDetection, LidarDetectionArray)
 ├── deploy/                   (Terraform, planned)
 └── scripts/                  dev-up.sh, prod-up.sh, topic-check.sh,
-                              bag-record.sh, bag-list.sh, publish-fake-lidar.sh
+                              bag-record.sh, bag-list.sh,
+                              publish-fake-lidar.sh, publish-fake-scan.sh
 ```
 
 ## Quick start (GCP VM, already provisioned)
@@ -79,13 +80,12 @@ See [HANDOFF.md](HANDOFF.md) for the working context and open items.
 | `mavros` | always | MAVLink ⇄ ROS 2 bridge. |
 | `foxglove` | always | Browser visualization via `foxglove_bridge`, TCP 8765. |
 | `commander` | always | Autonomy node. Low-battery latch → `set_mode RTL`. |
-| `perception-lidar` | always | DBSCAN + per-class shape priors on `/lidar/points` → `atl4s_msgs/LidarDetectionArray` on `/perception/lidar/detections`. Config from `services/dashboard/config/pipelines/perception-lidar.yaml` (the file the dashboard's Pipelines form writes). First user of `shared/atl4s_msgs/`. |
+| `perception-lidar` | always | DBSCAN + per-class shape priors on a configurable lidar input (`/lidar/points` PointCloud2 for 3D, `/lidar/scan` LaserScan for 2D). Publishes `atl4s_msgs/LidarDetectionArray` on `/perception/lidar/detections` and `visualization_msgs/MarkerArray` on `/perception/lidar/markers` for Foxglove Studio's 3D panel. Config from `services/dashboard/config/pipelines/perception-lidar.yaml`. First user of `shared/atl4s_msgs/`. |
 | `rosbag-manager` | always | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser, replay via `ros2 bag play`. Loopback on `127.0.0.1:8086`. Consumed by `dashboard`, `scripts/bag-record.sh`, and any future host caller. |
 | `dashboard` | always | Single human-facing surface on TCP 8089 with HTTP Basic. Apple-style sidebar shell. Streaming `/api/*` proxy to `rosbag-manager`; `/ws/topics`, `/ws/camera/{robot_id}`, `/ws/ros/sample/{topic}` rclpy bridges. Tabs: **Home** (overview wired to every registry API; active-task pill banner during record/replay), **Robots** (YAML-driven registry in `services/dashboard/config/robots.yaml`; per-robot telemetry / Leaflet map / camera / topics table — Gazebo Drone live, Orin Drone registered offline), **Pipelines** (YAML-driven perception / fusion service registry in `config/pipelines.yaml`; schema-generated config form persisted to `config/pipelines/{id}.yaml`; Start/Stop via docker.sock; per-card "Run on bag" replays any GCS bag through the running pipeline — `perception-lidar` declared and ready), **Rosbag Manager** (one merged page; GCS + local bags fused, persistent record/replay strip, modals for new recording + upload), **ROS** (full topic graph with type, pub/sub counts, per-endpoint QoS, click-to-inspect sample drawer), **Health** (per-container state via mounted `/var/run/docker.sock:ro` + per-topic liveness — replaces the retired `healthcheck` service). Foxglove deep link from Home, Robots detail, and the active-replay strip. React + Vite + TS frontend (lucide-react icons), FastAPI + rclpy backend in one image. |
-| `perception-detector` | planned | Object detection on the L4 GPU (first GPU service, first user of `shared/atl4s_msgs/`). |
+| `perception-detector` | planned | Object detection on the L4 GPU (first GPU service). |
 | `perception-segmenter` | planned | Segmentation. |
 | `perception-fault` | planned | Fault / anomaly detection. |
-| `perception-lidar` | planned | Point-cloud processing (gated on a real lidar source — Gazebo gpu_lidar back-pressures FDM). |
 | `fusion` | planned | Combines perception + pose into tracks / events. |
 | `event-publisher` | planned | Application events → GCP Pub/Sub. |
 | `ingestion` | planned | Zenoh bridge for ROS topics over WAN from the Orin Nano. |

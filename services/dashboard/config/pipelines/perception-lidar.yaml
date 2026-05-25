@@ -3,6 +3,8 @@ confidence_threshold: 0.5
 target_classes:
 - aircraft
 - tank
+input_type: pointcloud2
 input_topic: /lidar/points
 output_topic: /perception/lidar/detections
+marker_topic: /perception/lidar/markers
 enable_tracking: false

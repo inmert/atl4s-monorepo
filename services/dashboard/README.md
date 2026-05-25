@@ -13,7 +13,7 @@ Phased Apple-style redesign in progress. Phase 1 (sidebar shell + new IA + desig
 | `/` | Overview: stat tiles (battery, mode, topics seen — primary robot), per-card summaries of Robots, Health, Pipelines, Rosbags, plus quick-link tiles to each tab. Foxglove deep link. |
 | `/robots` | Device registry from `config/robots.yaml`. Card per robot with kind, live online dot, and one-line state summary. |
 | `/robots/:id` | Per-robot detail: telemetry stat strip (state, mode, armed, battery, voltage, lat/lon), Leaflet map scoped to the robot's `gps` topic with 1000-point trail, JPEG camera viewport over `/ws/camera/{robot_id}`, telemetry topic table with rate + last-update, Foxglove deep link. |
-| `/pipelines` | Today: auto-discovers `/perception/*` and `/fusion/*` and offers a bag-against-pipeline replay. Phase 6: becomes a perception-service config + on/off toggle UI (e.g. lidar detection threshold, target classes); config persisted to YAML. |
+| `/pipelines` | YAML-driven perception / fusion service registry (`config/pipelines.yaml`). Card per pipeline with icon, status badge from docker.sock (Running / Stopped / Not deployed), input → output topics, inline Start/Stop, expand-to-Configure drawer. The drawer shows live output rates (sourced from the existing TopicProvider) above a config form generated from the registry's `config_schema`. Field types: `string`, `number`, `slider`, `boolean` (Apple-style toggle), `select` (dropdown), `list_string`. Save persists `config/pipelines/{id}.yaml` atomically; Restart re-execs the container so the service picks up the new values. |
 | `/rosbags` | Rosbag Manager — one merged surface. Single table fusing `/api/bags` (GCS) and `/api/uploads` (local stage) on name, sorted newest-first. Per-row "Where" badge: GCS / Local · pending / Uploading / Recording / Replaying. Per-row inline actions are context-aware (Replay / Stop replay / Upload now / Stop recording / Delete). Persistent strip at the top while a record or replay is active, with Stop + Foxglove deep-link. Header buttons: New Recording (modal) + Upload (modal). Expanding a row keeps the metadata.yaml + file-list drawer with download links. Old `/rosbags/{record,replay}` sub-routes still resolve to the same page so saved tabs don't 404. |
 | `/ros` | Full ROS topic graph from the rclpy node. Namespace-grouped cards with collapsible sections, type-aware filter, per-topic pub / sub counts. Click a row to open the inspector: per-endpoint node + QoS badge, plus a live sample drawer that opens `/ws/ros/sample/{topic}` and streams the latest message JSON with rate. |
 | `/health` | Two cards. **Containers** — every `atl4s-*` container from the host Docker daemon (via mounted `/var/run/docker.sock:ro`) with state, health, uptime, restart count, derived level. **Topic liveness** — per-registry-telemetry-topic age + rate, level OK/IDLE/WARN/ERR. Aggregate badge in the page header and sidebar reflects the worst level (IDLE doesn't degrade — an offline robot in the registry isn't a fault). Combined snapshot at `GET /api/health`. |
@@ -28,6 +28,10 @@ Phased Apple-style redesign in progress. Phase 1 (sidebar shell + new IA + desig
 | `GET` | `/api/ros/topics` | Full topic graph from the rclpy node: every topic on the bus with its types, pub/sub counts, and per-endpoint node name + QoS. The dashboard's own subscriber is filtered out of the sub count. |
 | `GET` | `/api/containers` | Per-container state from the host Docker daemon (filtered to the `atl4s-` name prefix). `503` if the docker socket isn't mounted. |
 | `GET` | `/api/health` | Combined snapshot: containers + per-topic liveness + aggregate level + per-level counts. Polled by the nav badge / Home card / Health page every 5 s via a single `HealthProvider` context. |
+| `GET` | `/api/pipelines` | List of registered pipelines with per-pipeline docker status. |
+| `GET` | `/api/pipelines/{id}` | One pipeline + its current on-disk config (schema defaults merged in). |
+| `PUT` | `/api/pipelines/{id}/config` | Validate against the schema, persist `config/pipelines/{id}.yaml` atomically. `400` on out-of-range or unknown-select. |
+| `POST` | `/api/pipelines/{id}/{start,stop,restart}` | Docker container action. `404` if the container isn't deployed; `409` on docker API conflict (e.g. start an already-running container). |
 | `*` | `/api/*` | Streaming proxy to `rosbag-manager` (see [services/rosbag-manager/README.md](../rosbag-manager/README.md)). HTTP Basic at the edge. |
 | `WS` | `/ws/topics` | Push curated ROS topic snapshots + rates as JSON deltas. Initial snapshot on connect. |
 | `WS` | `/ws/camera/{robot_id}` | Push JPEG-encoded frames from the robot's camera topic as binary WebSocket messages. 4404 close if the robot has no camera configured. |
@@ -48,6 +52,7 @@ services/dashboard/
 │   ├── auth.py            HTTP Basic (HTTP + WebSocket via header check)
 │   ├── proxy.py           streaming /api/* → rosbag-manager
 │   ├── robots.py          registry loader + /api/robots router
+│   ├── pipelines.py       registry + per-pipeline config R/W + /api/pipelines/{start,stop,restart,config}
 │   ├── ros.py             /api/ros/topics graph endpoint + /ws/ros/sample/{topic} handler
 │   ├── containers.py      docker SDK wrapper + /api/containers router (mounts /var/run/docker.sock:ro)
 │   ├── health.py          /api/health — combines containers.py + topic-bridge timestamps into one snapshot
@@ -84,6 +89,8 @@ services/dashboard/
 | `BAG_WEB_PASS` | (unset) | HTTP Basic password. Both must be set or both unset (auth disabled — only safe behind a closed firewall). |
 | `ROSBAG_MANAGER_URL` | `http://127.0.0.1:8086` | Where the proxy layer forwards bag-plane requests. |
 | `ROBOTS_CONFIG` | `/app/config/robots.yaml` | Path to the robot registry YAML (bind-mounted from `services/dashboard/config/` in compose). |
+| `PIPELINES_REGISTRY` | `/app/config/pipelines.yaml` | Path to the pipeline registry YAML. |
+| `PIPELINES_CONFIG_DIR` | `/app/config/pipelines` | Directory the dashboard writes per-pipeline runtime configs into (one `{id}.yaml` per pipeline). |
 | `CONTAINERS_NAME_PREFIX` | `atl4s-` | Substring filter applied to container names when listing for the Health page. Set to empty to surface every container on the host. |
 
 ## Robot registry
@@ -126,6 +133,36 @@ Callbacks update an in-memory snapshot and push deltas to per-client `asyncio.Qu
 ## Camera bridge
 
 `backend/camera.py` opens one `sensor_msgs/Image` subscription per unique `telemetry.camera` topic across the registry, re-encodes each frame to JPEG (quality 70) with OpenCV, and fans out to clients via `/ws/camera/{robot_id}`. The endpoint resolves the robot's camera topic from the registry; a `4404` close means no camera is configured for that robot.
+
+## Pipelines
+
+Two YAML surfaces:
+
+- `config/pipelines.yaml` — the registry. Each entry declares `id`, `name`, `description`, `kind`, `icon`, `container` (docker container name for Start/Stop), `input_topics`, `output_topics`, and a `config_schema` of typed fields.
+- `config/pipelines/{id}.yaml` — per-pipeline runtime config. The dashboard reads this on every request (merging on top of the schema defaults so a missing or partial file always produces a complete dict) and writes it on Save. Each perception service is expected to mount the same file and read it at startup.
+
+Field types supported in `config_schema`:
+
+| Type | Renders as | Notes |
+|---|---|---|
+| `string` | text input | |
+| `number` | number input | optional `min`, `max`, `step` |
+| `slider` | range slider with live readout | `min`, `max`, `step` required |
+| `boolean` | iOS-style toggle | |
+| `select` | dropdown | `options:` required |
+| `list_string` | comma/whitespace-split text → array | |
+
+Server-side validation rejects out-of-range numbers, unknown select options, and non-list values for `list_string`. Saves are atomic (write to `.yaml.tmp` then `rename`).
+
+Lifecycle (`/api/pipelines/{id}/start|stop|restart`) goes through the same Docker socket the Health page uses. If the container isn't deployed yet, the page shows the pipeline as **Not deployed** (level `idle`, doesn't degrade the aggregate badge) and the action endpoints return `404` with the message "container … is not deployed (build + run the service first)".
+
+Adding a new pipeline:
+
+```bash
+$EDITOR services/dashboard/config/pipelines.yaml      # add entry
+docker compose restart dashboard                       # picks up registry
+# (build + run the service container; it appears as Running once present)
+```
 
 ## Health (containers + topics)
 

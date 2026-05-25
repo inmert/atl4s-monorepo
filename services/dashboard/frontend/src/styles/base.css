@@ -1,0 +1,153 @@
+/* Resets, typography, generic utility classes, page-header chrome. */
+/* Depends on: tokens.css */
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    background: var(--bg);
+    color: var(--label);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+::selection {
+    background: var(--accent-soft);
+    color: var(--label);
+}
+
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--separator-strong);
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--label-4);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+h1,
+h2,
+h3 {
+    margin: 0;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--label);
+}
+
+h1 {
+    font-size: 26px;
+    letter-spacing: -0.02em;
+}
+
+h2 {
+    font-size: 17px;
+}
+
+h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--label-3);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+p {
+    margin: 0 0 10px;
+    color: var(--label-2);
+}
+
+a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+a:hover {
+    color: var(--accent-hover);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+}
+
+code,
+pre {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+}
+
+.mono {
+    font-family: var(--font-mono);
+}
+
+.dim {
+    color: var(--label-3);
+}
+
+.placeholder {
+    color: var(--label-3);
+    font-style: normal;
+}
+
+.hint {
+    color: var(--label-3);
+    font-size: 12.5px;
+    margin: 4px 0;
+}
+
+.page-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--separator);
+}
+
+.page-header h1 {
+    margin: 0;
+}
+
+.page-header .subtitle {
+    color: var(--label-3);
+    font-size: 13px;
+    margin-top: 4px;
+}
+
+.page-header-right,
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.section-h2 {
+    margin: 32px 0 12px;
+    font-size: 17px;
+    font-weight: 600;
+}
+

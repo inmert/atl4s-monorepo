@@ -66,18 +66,47 @@ services/dashboard/
     └── src/
         ├── main.tsx
         ├── App.tsx          sidebar shell + routes + health badge
-        ├── styles.css       design tokens (light/dark) + component styles
+        ├── styles/          design system, split by concern (imported by main.tsx)
+        │   ├── tokens.css       CSS variables only (light + dark)
+        │   ├── base.css         resets, typography, generic utilities, page-header
+        │   ├── layout.css       sidebar + main pane
+        │   ├── primitives.css   styles for lib/ui components
+        │   └── pages.css        page-specific (shrinks as pages migrate to primitives)
         ├── lib/
-        │   ├── api.ts       typed wrappers around /api/* + /api/robots
-        │   ├── ws.ts        WebSocket helper with reconnect/backoff
-        │   ├── topics.tsx   TopicProvider context (single /ws/topics)
-        │   ├── health.tsx   HealthProvider context (polls /api/health every 5s)
-        │   ├── robots.ts    iconFor + isOnline / isFresh / summarize helpers
-        │   ├── format.ts    bytes / dates
-        │   ├── foxglove.ts  deep-link builder
-        │   └── components.tsx  PageHeader, Card, StatTile, Badge, StatusDot, EmptyState, Modal, Subnav
-        └── pages/           Home / Robots / RobotDetail / Pipelines / RosbagManager / Ros / Health
+        │   ├── ui/          design primitives — typed React components for lib/ui
+        │   │   ├── index.ts           single import surface: `import { Button, Card } from '../lib/ui'`
+        │   │   ├── Button.tsx         primary | ghost | danger | link, sm | md, icon left/right, loading
+        │   │   ├── IconButton.tsx     square icon-only, accessible label required
+        │   │   ├── Toggle.tsx         iOS-style switch
+        │   │   ├── Pill.tsx           compact chip with optional dot/icon
+        │   │   ├── KeyValue.tsx       inline label/value row for dense lists
+        │   │   ├── Spinner.tsx        small indeterminate spinner
+        │   │   ├── Drawer.tsx         right-side sheet for config panels
+        │   │   ├── Card.tsx
+        │   │   ├── Badge.tsx
+        │   │   ├── StatusDot.tsx
+        │   │   ├── StatTile.tsx
+        │   │   ├── EmptyState.tsx
+        │   │   ├── Modal.tsx
+        │   │   ├── PageHeader.tsx
+        │   │   └── Subnav.tsx
+        │   ├── components.tsx  back-compat shim — re-exports from lib/ui (deprecated)
+        │   ├── api.ts          typed wrappers around /api/* + /api/robots
+        │   ├── ws.ts           WebSocket helper with reconnect/backoff
+        │   ├── topics.tsx      TopicProvider context (single /ws/topics)
+        │   ├── health.tsx      HealthProvider context (polls /api/health every 5s)
+        │   ├── robots.ts       iconFor + isOnline / isFresh / summarize helpers
+        │   ├── format.ts       bytes / dates
+        │   └── foxglove.ts     deep-link builder
+        └── pages/              Home / Robots / RobotDetail / Pipelines / RosbagManager / Ros / Health
+                                + UIShowcase (not in sidebar; visit /_ui for the design-system reference)
 ```
+
+## Design system
+
+The frontend ships with a small set of typed primitives in [src/lib/ui/](frontend/src/lib/ui/). All pages should compose from these instead of re-inventing chrome or inlining `style={{ … }}`. The CSS for each primitive lives in [src/styles/primitives.css](frontend/src/styles/primitives.css); design tokens (colors, radii, easing, etc.) live in [src/styles/tokens.css](frontend/src/styles/tokens.css) and respond to `prefers-color-scheme` for light/dark.
+
+A visual reference of every primitive is at `http://<dashboard>/_ui` (not linked from the sidebar — debug-only). When adding or revising a primitive, drop a usage example in [src/pages/UIShowcase.tsx](frontend/src/pages/UIShowcase.tsx) and verify it there before reaching for the page that needs it.
 
 ## Configuration
 

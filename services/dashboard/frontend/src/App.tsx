@@ -16,6 +16,7 @@ import { Pipelines } from './pages/Pipelines';
 import { RosbagManager } from './pages/RosbagManager';
 import { Ros } from './pages/Ros';
 import { Health } from './pages/Health';
+import { UIShowcase } from './pages/UIShowcase';
 
 const nav = [
   { to: '/', label: 'Home', icon: HomeIcon, end: true },
@@ -96,6 +97,8 @@ export function App() {
               <Route path="/rosbags/replay" element={<RosbagManager />} />
               <Route path="/ros" element={<Ros />} />
               <Route path="/health" element={<Health />} />
+              {/* Debug-only design-system showcase. Not in the sidebar. */}
+              <Route path="/_ui" element={<UIShowcase />} />
             </Routes>
           </main>
         </div>

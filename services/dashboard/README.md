@@ -1,21 +1,26 @@
 # dashboard
 
-Single human-facing surface for ATL4S. React + Vite + TS frontend, FastAPI + rclpy backend, served from one container. HTTP Basic on TCP 8089.
+Single human-facing surface for ATL4S. React + Vite + TS frontend (Apple-style sidebar shell, lucide-react icons, design-token CSS with light/dark via `prefers-color-scheme`), FastAPI + rclpy backend, served from one container. HTTP Basic on TCP 8089.
 
-Owns no bag state — proxies every bag-plane action to `rosbag-manager` on `127.0.0.1:8086`. Owns no compute — perception services do inference; the dashboard renders, browses, and triggers. 3D visualisation is deferred to Foxglove Studio via a deep link on the Live and Replay pages; the in-app view is raw data + 2D map + camera.
+Owns no bag state — proxies every bag-plane action to `rosbag-manager` on `127.0.0.1:8086`. Owns no compute — perception services do inference; the dashboard renders, browses, and triggers. 3D visualisation is deferred to Foxglove Studio via a deep link on the Home, Live, and Replay pages; the in-app view is raw data + 2D map + camera.
+
+Phased Apple-style redesign in progress. Phase 1 (sidebar shell + new IA + design tokens) has shipped; remaining phases listed in `HANDOFF.md` "Open items".
 
 ## Pages
 
 | Path | What it shows |
 |---|---|
-| `/` | Landing page + tab index. |
-| `/live` | Telemetry strip (state, mode, armed, battery, GPS), JPEG camera viewport, per-topic raw-data viewer with rates, "Open in Foxglove ↗" link. |
-| `/map` | Leaflet 2D map with OSM tiles, GPS marker + 1000-point trail from `/mavros/global_position/global`. |
-| `/bags` | GCS bag list, multipart upload, delete, expandable per-bag panel with parsed `metadata.yaml` (duration, message count, per-topic counts) and file list with download links. |
-| `/record` | Start/stop a recording (optional name / topics / duration), live status, local bag table with upload state + force-upload. |
-| `/replay` | Bag dropdown, start/stop, status, Foxglove deep link. |
-| `/pipelines` | Replay a bag through the perception stack; table of currently-observed `/perception/*` and `/fusion/*` topics (auto-discovered every 5s). |
-| `/health` | `DiagnosticArray` from `/atl4s/health` with per-topic level / message / key-value pairs. Aggregate badge in the nav. |
+| `/` | Overview: stat tiles (battery, mode, topics seen), per-card summaries of Robots, Health, Pipelines, Rosbags, plus quick-link tiles to each tab. Foxglove deep link. |
+| `/robots` | Device registry (Gazebo Drone + Orin Drone today). Phase 1: list view + per-robot stub that links back to legacy `/live` and `/map`. Phase 2: per-robot Telemetry / Map / Camera scoped to the selected robot, registry config in `services/dashboard/config/robots.yaml`. |
+| `/robots/:id` | Selected robot's detail pane (placeholder in phase 1). |
+| `/pipelines` | Today: auto-discovers `/perception/*` and `/fusion/*` and offers a bag-against-pipeline replay. Phase 6: becomes a perception-service config + on/off toggle UI (e.g. lidar detection threshold, target classes); config persisted to YAML. |
+| `/rosbags` | Rosbag Manager — segmented sub-nav over the three bag operations. |
+| `/rosbags` (Browse) | GCS bag list, multipart upload, delete, expandable per-bag panel with parsed `metadata.yaml` (duration, message count, per-topic counts) and file list with download links. |
+| `/rosbags/record` | Start/stop a recording (optional name / topics / duration), live status, local bag table with upload state + force-upload. |
+| `/rosbags/replay` | Bag dropdown, start/stop, status, Foxglove deep link. |
+| `/ros` | Curated topics grouped by namespace, with rate + last update. Phase 3: full ROS graph (every publisher / subscriber, QoS, on-demand sampling). |
+| `/health` | `DiagnosticArray` from `/atl4s/health` with per-topic level / message / key-value pairs. Nav badge reflects worst level. Phase 4: gains per-container Docker state via mounted `/var/run/docker.sock`. |
+| `/live`, `/map` | Legacy routes, off the sidebar — kept reachable for telemetry until phase 2 lands. |
 
 ## HTTP + WebSocket surfaces
 
@@ -40,22 +45,25 @@ services/dashboard/
 │   ├── proxy.py           streaming /api/* → rosbag-manager
 │   ├── topics.py          rclpy thread → /ws/topics fan-out + auto-discovery
 │   └── camera.py          rclpy thread → /ws/camera JPEG fan-out
-└── frontend/              React + Vite + TS
+└── frontend/              React + Vite + TS (lucide-react icons)
     ├── package.json
     ├── tsconfig.json
     ├── vite.config.ts
     ├── index.html
     └── src/
         ├── main.tsx
-        ├── App.tsx        nav + routes + health badge
-        ├── styles.css
+        ├── App.tsx          sidebar shell + routes + health badge
+        ├── styles.css       design tokens (light/dark) + component styles
         ├── lib/
-        │   ├── api.ts     typed wrappers around /api/*
-        │   ├── ws.ts      WebSocket helper with reconnect/backoff
-        │   ├── topics.tsx TopicProvider context (single /ws/topics)
-        │   ├── format.ts  bytes / dates
-        │   └── foxglove.ts deep-link builder
-        └── pages/         Home / Live / Map / Bags / Record / Replay / Pipelines / Health
+        │   ├── api.ts       typed wrappers around /api/*
+        │   ├── ws.ts        WebSocket helper with reconnect/backoff
+        │   ├── topics.tsx   TopicProvider context (single /ws/topics)
+        │   ├── format.ts    bytes / dates
+        │   ├── foxglove.ts  deep-link builder
+        │   └── components.tsx  PageHeader, Card, StatTile, Badge, StatusDot, EmptyState, Subnav
+        └── pages/           Home / Robots / Pipelines / RosbagManager / Ros / Health
+                             plus Bags, Record, Replay (mounted inside RosbagManager)
+                             plus legacy Live, Map (off-sidebar, removed after phase 2)
 ```
 
 ## Configuration

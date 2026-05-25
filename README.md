@@ -30,7 +30,7 @@ atl4s-monorepo/
 │   ├── foxglove/             ROS 2 topics → WebSocket on TCP 8765
 │   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
 │   ├── healthcheck/          Topic-liveness monitor: stdout + HTTP /health + /atl4s/health
-│   ├── dashboard/            Operator UI: live view, bags, record/replay, pipelines, health (HTTP Basic, TCP 8089)
+│   ├── dashboard/            Operator UI: home, robots, pipelines, rosbags, ROS, health (HTTP Basic, TCP 8089)
 │   └── rosbag-manager/       HTTP API for bag-plane ops: record / upload / GCS browser / replay (loopback 127.0.0.1:8086)
 ├── shared/                   FastDDS XML profile shared by all ROS containers
 ├── deploy/                   (Terraform, planned)
@@ -79,7 +79,7 @@ See [HANDOFF.md](HANDOFF.md) for the working context and open items.
 | `commander` | always | Autonomy node. Low-battery latch → `set_mode RTL`. |
 | `healthcheck` | always | Topic-liveness monitor. stdout, HTTP `:8088/health`, `/atl4s/health`. |
 | `rosbag-manager` | always | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser, replay via `ros2 bag play`. Loopback on `127.0.0.1:8086`. Consumed by `dashboard`, `scripts/bag-record.sh`, and any future host caller. |
-| `dashboard` | always | Single human-facing surface on TCP 8089 with HTTP Basic. Streaming `/api/*` proxy to `rosbag-manager`; `/ws/topics` + `/ws/camera` rclpy bridges. Pages: Live (telemetry + raw-data + camera), Map (Leaflet GPS plot), Bags (with metadata.yaml preview), Record, Replay, Pipelines (auto-discovers `/perception/*` + `/fusion/*`), Health. Foxglove deep link from Live + Replay. React + Vite + TS frontend, FastAPI + rclpy backend in one image. |
+| `dashboard` | always | Single human-facing surface on TCP 8089 with HTTP Basic. Apple-style sidebar shell. Streaming `/api/*` proxy to `rosbag-manager`; `/ws/topics` + `/ws/camera` rclpy bridges. Tabs: **Home** (overview), **Robots** (device registry; per-robot telemetry being built out), **Pipelines** (auto-discovers `/perception/*` + `/fusion/*`; service config in progress), **Rosbag Manager** (`/rosbags`, `/rosbags/record`, `/rosbags/replay`), **ROS** (topics by namespace), **Health** (DiagnosticArray). Foxglove deep link from Home, Live, Replay. React + Vite + TS frontend (lucide-react icons), FastAPI + rclpy backend in one image. |
 | `perception-detector` | planned | Object detection on the L4 GPU (first GPU service, first user of `shared/atl4s_msgs/`). |
 | `perception-segmenter` | planned | Segmentation. |
 | `perception-fault` | planned | Fault / anomaly detection. |

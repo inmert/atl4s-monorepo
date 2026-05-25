@@ -215,6 +215,12 @@ Any future service that publishes or subscribes to an `atl4s_msgs/*` type follow
 
 A repo-root `.dockerignore` keeps the three context=. builds from shipping the whole repo (data/, .git, node_modules, **/dist) to the Docker daemon every build.
 
+### ROS `float` NaN/Inf → invalid JSON over the WebSocket
+
+ROS messages routinely carry `NaN` in optional fields the source can't measure — ArduPilot reports `sensor_msgs/BatteryState.charge`, `.capacity`, and `.design_capacity` as NaN every frame, and many other sensor types do the same. Python's default `json.dumps` emits these as the literal token `NaN` (and `Infinity`/`-Infinity`), which is not valid JSON per RFC 8259. The browser's `JSON.parse` throws on the whole frame, every consumer of that topic sees no data, and any stat tile / panel that reads those values shows `"—"` because the topic entry never appears in the React state map.
+
+The dashboard sanitizes in `services/dashboard/backend/topics.py:_sanitize_for_json` — walks the OrderedDict that `message_to_ordereddict` returns and replaces NaN/Inf floats with `None`. The frontend's `value != null ? value : '—'` check then correctly falls through to the placeholder for that one field while keeping the rest of the message visible. Any new path that ships a ROS message to a JSON consumer (custom widgets, future `/api/*` returning live telemetry) needs the same sanitize.
+
 ### ROS `byte` field → 1-char string in JSON
 
 `rosidl_runtime_py.message_to_ordereddict()` represents ROS `byte` fields as 1-character `str`, not `int`. `diagnostic_msgs/DiagnosticStatus.level` is the obvious one (`b'\x00'` becomes `"\u0000"` in the JSON the dashboard ships to the browser). The dashboard frontend coerces via `String.charCodeAt(0)` in `pages/Health.tsx` and `App.tsx`. Other byte fields to watch for if they ever surface: `sensor_msgs/BatteryState.power_supply_status`, `sensor_msgs/Imu` orientation_covariance (no, that's float).

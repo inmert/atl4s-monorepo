@@ -16,6 +16,7 @@ The subscribed topic set is the union of:
 import asyncio
 import json
 import logging
+import math
 import threading
 import time
 from collections import deque
@@ -78,8 +79,35 @@ def topics_from_registry(robots: Iterable) -> list[tuple[str, type]]:
     return out
 
 
+def _sanitize_for_json(obj):
+    """Walk a Python native and replace NaN/Inf floats with None.
+
+    ROS messages frequently carry NaN in optional fields the source can't
+    measure (e.g. ArduPilot reports `charge`/`capacity`/`design_capacity`
+    on `sensor_msgs/BatteryState` as NaN). Python's default `json.dumps`
+    emits these as the literal token `NaN`, which is not valid JSON
+    (RFC 8259) — the browser's `JSON.parse` rejects the whole frame and
+    every consumer of that topic sees no data. Convert to `null` so the
+    frontend can treat the field as absent and fall through to its
+    "—" placeholder.
+    """
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
+
+
 def _to_json_safe(msg) -> dict:
-    return json.loads(json.dumps(message_to_ordereddict(msg), default=str))
+    # `default=str` is the catch-all for ROS types json doesn't know how to
+    # serialize directly (mostly OrderedDict cells, bytes via byte-field
+    # gotcha). The pre-sanitize pass replaces NaN/Inf with None before
+    # json.dumps so the eventual websocket frame stays valid JSON.
+    return json.loads(
+        json.dumps(_sanitize_for_json(message_to_ordereddict(msg)), default=str)
+    )
 
 
 class TopicBridge:

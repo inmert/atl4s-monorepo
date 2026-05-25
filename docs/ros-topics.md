@@ -58,3 +58,18 @@ Also surfaced as HTTP `GET /health` on TCP 8088 (`200` if all required topics fr
 |---|---|---|---|
 | `/fusion/tracks` | `atl4s_msgs/TrackArray` | fusion | Tracked entities in world frame |
 | `/atl4s/events` | `atl4s_msgs/Event` | fusion | Events for downstream consumers |
+
+## Dashboard (planned)
+
+The `dashboard` service is a sink — it subscribes to the curated set below and publishes nothing of its own.
+
+| Topic | Use |
+|---|---|
+| `/mavros/state`, `/mavros/battery`, `/mavros/imu/data`, `/mavros/global_position/*` | Live telemetry strip |
+| `/camera/image`, `/camera/camera_info` | Camera viewport |
+| `/atl4s/health` | Health panel |
+| `/perception/*` | Model results, once those services exist |
+
+## rosbag-manager (planned)
+
+Sits adjacent to the topic graph — does not subscribe to or publish any ROS topic directly. Spawns `ros2 bag record` and `ros2 bag play` as subprocesses; each child interacts with the bus using its own QoS profile (see the [bag-record QoS gotcha](../HANDOFF.md) for the Best-Effort override file). Replayed bags carry their recorded QoS, so perception services consume them indistinguishably from live data.

@@ -199,19 +199,18 @@ Same trap as the env merge above: a service-level `volumes:` list silently repla
 | 5 | `foxglove` | running | always | `foxglove_bridge 3.3.0` on TCP 8765. BE whitelist in `params.yaml`; `mavros_msgs` installed so Studio can call MAVROS services. Add the `-msgs` package of every new service that exposes services. |
 | 6 | `commander` | running | always | Autonomy. Low-battery latch → `/mavros/set_mode RTL`. Threshold via `BATTERY_LOW_THRESHOLD`. |
 | 7 | `healthcheck` | running | always | Topic-liveness monitor. Stdout summary + HTTP `/health` on 8088 + `/atl4s/health` (DiagnosticArray). |
-| 8 | `bag-web` | running | always | Browser UI for `gs://atl4s-rosbags`. HTTP Basic on TCP 8089. Create + view + download + delete. |
-| 9 | `bag-record` | running | record | `ros2 bag record` → mcap under `data/bags/<name>/`. Topics via `RECORD_TOPICS`. |
-| 10 | `bag-uploader` | running | record | Watches `data/bags`; uploads completed bag dirs to `gs://atl4s-rosbags`. Idempotent via `<bag>.uploaded` sentinel. VM service account via metadata server. |
-| 11 | `web-backend` | planned | — | FastAPI WebSocket subscribing to curated `/mavros/*` + `/atl4s/*` slice; foundation for the custom UI distinct from Foxglove. |
-| 12 | `web-frontend` | planned | — | Browser dashboard against `web-backend`. |
-| 13 | `bag-replay` | planned | — | Pulls a bag from GCS by name and `ros2 bag play`s it onto the DDS bus. One-shot. |
-| 14 | `perception-detector` | planned | — | YOLO on `/camera/image`, L4 GPU. First use of `shared/atl4s_msgs/`. |
-| 15 | `perception-segmenter` | planned | — | Segmentation. |
-| 16 | `perception-fault` | planned | — | Fault / anomaly detection. |
-| 17 | `perception-lidar` | planned | — | Point-cloud processing, once a lidar source exists (Gazebo gpu_lidar back-pressures the FDM loop — see Open items). |
-| 18 | `fusion` | planned | — | Combines perception + pose into tracks / events. |
-| 19 | `event-publisher` | planned | — | Application events → GCP Pub/Sub. |
-| 20 | `ingestion` | planned | — | Zenoh bridge for ROS topics over WAN from the Orin (last). |
+| 8 | `bag-web` | running | always | Browser UI for `gs://atl4s-rosbags`. HTTP Basic on TCP 8089. Scheduled for removal once `dashboard` reaches bag-browser parity. |
+| 9 | `bag-record` | running | record | `ros2 bag record` → mcap under `data/bags/<name>/`. Topics via `RECORD_TOPICS`. Scheduled for removal once `rosbag-manager` subsumes. |
+| 10 | `bag-uploader` | running | record | Watches `data/bags`; uploads completed bag dirs to `gs://atl4s-rosbags`. Idempotent via `<bag>.uploaded` sentinel. VM service account via metadata server. Scheduled for removal once `rosbag-manager` subsumes. |
+| 11 | `rosbag-manager` | planned | always | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser (list / upload / download / delete), and replay via `ros2 bag play`. Binds `127.0.0.1:8086` (loopback only). `FROM ros:humble`. Consumed by `dashboard`, `scripts/bag-record.sh`, and any future caller on the host. Subsumes `bag-record` + `bag-uploader` + `bag-web`'s GCS API + the planned bag-replay. |
+| 12 | `dashboard` | planned | always | Single human-facing surface on TCP 8089 (reuses bag-web's port + `BAG_WEB_USER` / `BAG_WEB_PASS`). Live topic view (`/mavros/*`, `/atl4s/*`, camera, `/perception/*`) via rclpy → WebSocket. Bag browser, record, and replay UI proxy to `rosbag-manager` under HTTP Basic. React + Vite + TS frontend; FastAPI + rclpy backend in one image. Subsumes planned web-backend, web-frontend; supersedes bag-web's UI. |
+| 13 | `perception-detector` | planned | — | YOLO on `/camera/image`, L4 GPU. First use of `shared/atl4s_msgs/`. |
+| 14 | `perception-segmenter` | planned | — | Segmentation. |
+| 15 | `perception-fault` | planned | — | Fault / anomaly detection. |
+| 16 | `perception-lidar` | planned | — | Point-cloud processing, once a lidar source exists (Gazebo gpu_lidar back-pressures the FDM loop — see Open items). |
+| 17 | `fusion` | planned | — | Combines perception + pose into tracks / events. |
+| 18 | `event-publisher` | planned | — | Application events → GCP Pub/Sub. |
+| 19 | `ingestion` | planned | — | Zenoh bridge for ROS topics over WAN from the Orin (last). |
 
 ## Topic contracts
 
@@ -226,9 +225,24 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
 
 1. **More `commander` behaviors** — takeoff command, waypoint loop, geofence triggers, event publishing to `/atl4s/events`. Pure ROS 2 work, no new infrastructure.
 2. **First perception service (`perception-detector`)** — stand up `shared/atl4s_msgs/` for Detection types, then `services/perception-detector` (CUDA base + YOLO on `/camera/image`). First use of the L4 GPU for inference.
-3. **`web-backend` + `web-frontend`** — FastAPI WebSocket service for a curated `/mavros/*` + `/atl4s/*` slice, plus a browser dashboard. Distinct from `bag-web`, which is GCS-only. Becomes the custom UI replacing Foxglove for operational views.
-4. **`bag-replay` service** — pulls a bag from GCS by name and `ros2 bag play`s it onto the DDS bus. Useful once perception services exist (replay recorded camera frames against the detector). Pattern: one-shot `docker compose run --rm bag-replay BAG=<name>`.
-5. **Drone integration (Orin Nano)** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. Orin-side `bag-record` + `bag-uploader` push real RealSense + lidar bags to GCS. Zenoh bridge for ROS topics over WAN comes at the end (`ingestion` service).
+3. **Build `rosbag-manager` service** — HTTP API for every bag-plane operation. One container, `FROM ros:humble`, FastAPI on `127.0.0.1:8086`. Replaces `bag-record` + `bag-uploader` + `bag-web`'s GCS API and absorbs the planned bag-replay. Owns the `/data/bags` mount and the GCS client. Staged build, one commit each:
+   1. Scaffold `services/rosbag-manager/` (FastAPI on `ros:humble`, `/healthz`, compose entry under `always`, loopback bind).
+   2. `POST /api/record/start`, `POST /api/record/stop`, `GET /api/record/status` — manages a single `ros2 bag record` subprocess (one recording at a time; queue later if needed).
+   3. Watcher loop + `GET /api/uploads` + `POST /api/uploads/{name}` — port from `bag-uploader` and expose status.
+   4. GCS browser: `GET /api/bags`, `GET /api/bags/{name}/files`, file download, multipart upload, `DELETE /api/bags/{name}` — port from `bag-web`'s API.
+   5. `POST /api/replay/start`, `POST /api/replay/stop`, `GET /api/replay/status` — manages a single `ros2 bag play` subprocess (download from GCS to `/tmp/replays`, SIGTERM stop).
+   6. Rewrite `scripts/bag-record.sh` to call the API (replaces `docker compose up bag-record bag-uploader` + sentinel polling).
+   7. Delete `services/bag-record/` and `services/bag-uploader/`; retire the `record` compose profile.
+4. **Build `dashboard` service** — single human-facing surface; UI + live topic bridge + proxy to `rosbag-manager`. One container: multi-stage Dockerfile (Node build → `ros:humble` runtime), FastAPI + rclpy backend, React + Vite + TS frontend. Reuses bag-web's port 8089 and `BAG_WEB_USER` / `BAG_WEB_PASS`. Owns no bag state — proxies all bag operations to `rosbag-manager`. Staged build, one commit each:
+   1. Scaffold `services/dashboard/` (multi-stage Dockerfile, React skeleton, FastAPI `/healthz`, compose entry under `always`; depends on `rosbag-manager`).
+   2. Backend proxy layer: forward `/api/bags/*`, `/api/record/*`, `/api/replay/*`, `/api/uploads*` to `http://127.0.0.1:8086`. HTTP Basic enforced at the edge.
+   3. Frontend Bag-browser page hitting the proxied endpoints → reach `bag-web` UI parity → delete `services/bag-web/` and its compose entry.
+   4. `rclpy` bridge + `/ws/topics` + Live page (`/mavros/state`, `/mavros/battery`, `/mavros/imu/data`, `/mavros/global_position/*`).
+   5. `/ws/camera` (JPEG-encoded `/camera/image` frames).
+   6. Record + Replay pages calling the proxied endpoints; live state via polling or `/ws/replay`.
+   7. `/ws/health` + Health panel from `/atl4s/health`.
+   8. Reserve `/perception/*` subscription hook for the first perception service.
+5. **Drone integration (Orin Nano)** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. Orin-side recording + upload calls `rosbag-manager`'s API to push real RealSense + lidar bags to GCS. Zenoh bridge for ROS topics over WAN comes at the end (`ingestion` service).
 6. **B.3 — lidar in Gazebo (parked).** Attempted: gpu_lidar block in `services/gazebo/world/models/atl4s_lidar/` + composite `iris_with_lidar` model + `atl4s.sdf` world. Even at 90×4 rays @ 1 Hz the render back-pressures the JSON-FDM loop — SITL logs continuous `No JSON sensor message received, resending servos`. Retry path: lighter ray budget (e.g. 16×1), async sensor rendering, or skip Gazebo lidar entirely and validate `perception-lidar` against real Orin/RealSense data later. Files were rolled back; not in the repo today.
 7. **Security tightening** — IAP-only SSH (`35.235.240.0/20`), Foxglove / web behind Tailscale, per-team IAM bindings. Defer until test phase is over.
 8. **GCS bucket region** — bucket is us-east4 but VM is northamerica-northeast1; consider recreating co-located for production traffic.

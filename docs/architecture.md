@@ -26,3 +26,12 @@ Docker Compose with profiles. `--profile sim` enables SITL; production omits the
 ## Networking
 
 All containers use `network_mode: host`. DDS discovery and same-host UDP work without per-service port maps. When the Orin Nano is added, it forwards MAVLink to the VM's external IP:14550. ROS topics over WAN will be bridged via Zenoh (`zenoh-bridge-ros2dds`) once sensor topics from the Orin are in scope; pure MAVLink telemetry needs no bridge.
+
+## Operator UI and bag plane
+
+Two services own the human-facing and storage planes; the boundary between them is the bag plane:
+
+- **`dashboard`** — single human-facing surface on TCP 8089 (HTTP Basic). Renders live ROS topics via rclpy + WebSocket, and proxies every bag-plane action to `rosbag-manager`. Owns no state, runs no models.
+- **`rosbag-manager`** — HTTP API for every bag-plane action: record start/stop/status, watcher + GCS upload, GCS browser (list / upload / download / delete), and replay via `ros2 bag play`. Binds `127.0.0.1:8086` (loopback only; reachable from the dashboard, from `scripts/*`, and from any future service on the host).
+
+This consolidates what would otherwise be six separate services (live backend, browser frontend, bag browser, bag record, bag uploader, bag replay) into two with a clean line: humans hit `dashboard`, bag operations go through `rosbag-manager`. Foxglove Studio stays available for ad-hoc development.

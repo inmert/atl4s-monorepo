@@ -79,12 +79,11 @@ See [HANDOFF.md](HANDOFF.md) for the working context and open items.
 | `foxglove` | always | Browser visualization via `foxglove_bridge`, TCP 8765. |
 | `commander` | always | Autonomy node. Low-battery latch → `set_mode RTL`. |
 | `healthcheck` | always | Topic-liveness monitor. stdout, HTTP `:8088/health`, `/atl4s/health`. |
-| `bag-web` | always | Browser UI for `gs://atl4s-rosbags` (list / upload / download / delete). HTTP Basic on TCP 8089. |
-| `bag-record` | record | `ros2 bag record` → mcap under `data/bags/<name>/`. |
-| `bag-uploader` | record | Pushes completed bags to `gs://atl4s-rosbags`. |
-| `web-backend` | planned | FastAPI WebSocket for the custom dashboard slice of `/mavros/*` + `/atl4s/*`. Distinct from `bag-web`. |
-| `web-frontend` | planned | Browser dashboard against `web-backend`. |
-| `bag-replay` | planned | `ros2 bag play`s a GCS-stored bag back onto the DDS bus. |
+| `bag-web` | always | Browser UI for `gs://atl4s-rosbags` (list / upload / download / delete). HTTP Basic on TCP 8089. Scheduled for removal once `dashboard` reaches bag-browser parity. |
+| `bag-record` | record | `ros2 bag record` → mcap under `data/bags/<name>/`. Scheduled for removal once `rosbag-manager` subsumes. |
+| `bag-uploader` | record | Pushes completed bags to `gs://atl4s-rosbags`. Scheduled for removal once `rosbag-manager` subsumes. |
+| `rosbag-manager` | planned | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser, replay via `ros2 bag play`. Loopback on `127.0.0.1:8086`. Consumed by `dashboard`, `scripts/bag-record.sh`, and any future host caller. Subsumes `bag-record` + `bag-uploader` + `bag-web`'s GCS API + the planned bag-replay. |
+| `dashboard` | planned | Single human-facing surface on TCP 8089 (inherits bag-web's port + HTTP Basic creds). Live topic view (`/mavros/*`, `/atl4s/*`, camera, `/perception/*`) via rclpy → WebSocket; bag browser / record / replay UI proxied to `rosbag-manager`. React + Vite + TS frontend, FastAPI + rclpy backend in one image. Subsumes the planned web-backend / web-frontend; supersedes bag-web's UI. |
 | `perception-detector` | planned | Object detection on the L4 GPU (first GPU service, first user of `shared/atl4s_msgs/`). |
 | `perception-segmenter` | planned | Segmentation. |
 | `perception-fault` | planned | Fault / anomaly detection. |

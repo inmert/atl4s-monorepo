@@ -21,6 +21,8 @@
 
 The image installs `ros-humble-mavros-msgs` so the bridge can expose `/mavros/*` services to Studio. Add the `-msgs` package of every new ATL4S service that exposes services.
 
+Custom message packages (currently `shared/atl4s_msgs/`) are colcon-built into the image at `/workspace/install/` from the repo-root build context. The entrypoint sources that overlay on top of `/opt/ros/humble/setup.bash`. Without this Studio cannot deserialize `atl4s_msgs/*` topics (e.g. `/perception/lidar/detections`).
+
 ## QoS whitelist
 
 `foxglove_bridge` subscribes Reliable + Volatile by default. BE publishers don't match a Reliable sub and get dropped silently. The current entries in [params.yaml](params.yaml) `best_effort_qos_topic_whitelist`:
@@ -28,6 +30,7 @@ The image installs `ros-humble-mavros-msgs` so the bridge can expose `/mavros/*`
 - `/imu/gazebo`, `/clock` — high-rate gz-bridge topics
 - `/mavros/.*` — most MAVROS publishers are BE
 - `/uas1/.*` — raw MAVLink streams from MAVROS
+- `/lidar/.*`, `/perception/.*`, `/fusion/.*` — perception / fusion services publish BE
 
 Add new BE namespaces here when standing up new services. TRANSIENT_LOCAL latched topics (`/tf_static`, `/mavros/home_position/home`, …) are handled automatically by `foxglove_bridge 3.x` durability matching.
 

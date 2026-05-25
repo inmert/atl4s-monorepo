@@ -39,14 +39,22 @@ Renames are configured in [services/gz-bridge/bridge.yaml](../services/gz-bridge
 
 There is no dedicated health topic. The dashboard owns health: per-container state via the bind-mounted `/var/run/docker.sock:ro` and per-topic liveness computed from its own topic-bridge timestamps, combined into `GET /api/health` (HTTP Basic). The standalone `services/healthcheck` and its `/atl4s/health` `DiagnosticArray` publisher were retired in phase 4 of the dashboard redesign.
 
+## Perception (lidar — live)
+
+| Topic | Type | Direction | Description |
+|---|---|---|---|
+| `/lidar/points` | `sensor_msgs/PointCloud2` | in | Lidar input. No live source on the VM today; use `scripts/publish-fake-lidar.sh` to drive synthetic frames at 5 Hz. Real source will come from the Orin via the future `ingestion` service. |
+| `/perception/lidar/detections` | `atl4s_msgs/LidarDetectionArray` | out | Per-frame detections. Each `LidarDetection` carries `class_id` (e.g. "aircraft", "tank", "other"), `score` (0..1), `center` (Point), `size` (Vector3 = length / width / height), `track_id` (int32, 0 when tracking is off). Header frame matches the input cloud's frame. |
+
+Configured + lifecycle-controlled from the dashboard Pipelines page. Runtime config lives at `services/dashboard/config/pipelines/perception-lidar.yaml`.
+
 ## Perception (planned)
 
 | Topic | Type | Publisher | Description |
 |---|---|---|---|
-| `/perception/detections` | `atl4s_msgs/DetectionArray` | perception-detector | 2D detections in image space |
+| `/perception/detections` | `atl4s_msgs/Detection2DArray` | perception-detector | 2D detections in image space |
 | `/perception/masks` | `atl4s_msgs/SegmentationMaskArray` | perception-segmenter | Segmentation masks |
 | `/perception/faults` | `atl4s_msgs/FaultReport` | perception-fault | Anomaly / fault reports |
-| `/perception/lidar_objects` | `atl4s_msgs/ObstacleArray` | perception-lidar | Clustered obstacles |
 
 ## Fusion (planned)
 

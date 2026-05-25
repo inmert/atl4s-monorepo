@@ -59,9 +59,11 @@ atl4s-monorepo/
 │   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
 │   ├── dashboard/            Operator UI: home, robots, pipelines, rosbags, ROS, health (HTTP Basic, TCP 8089)
 │   │   └── config/           robot registry (`robots.yaml`) + pipeline registry (`pipelines.yaml`) + per-pipeline runtime configs (`pipelines/{id}.yaml`); bind-mounted RW
+│   └── perception-lidar/     DBSCAN-based lidar detector — first user of `shared/atl4s_msgs/`
 │   └── rosbag-manager/       HTTP API for bag-plane ops: record / upload / GCS browser / replay (loopback 127.0.0.1:8086)
 ├── shared/
-│   └── fastdds_profiles.xml  shared FastDDS XML (see gotchas)
+│   ├── fastdds_profiles.xml  shared FastDDS XML (see gotchas)
+│   └── atl4s_msgs/           ament_cmake message package (`LidarDetection`, `LidarDetectionArray` today). Built into the perception-lidar, dashboard, and foxglove images.
 ├── data/bags/                (gitignored) local staging area for bags before upload
 ├── deploy/                   (Terraform, planned)
 └── scripts/                  dev-up.sh, prod-up.sh, topic-check.sh,
@@ -101,6 +103,7 @@ atl4s-monorepo/
 - gz-bridge: `/camera/image` (640×480 @ 5 Hz), `/camera/camera_info`, `/imu/gazebo` (~600 Hz), `/clock` (~600 Hz) flowing as ROS 2 topics.
 - Foxglove: WebSocket on `0.0.0.0:8765`. BE whitelist covers `/imu/gazebo`, `/clock`, `/mavros/.*`, `/uas1/.*` (raw MAVLink dropped silently without the last one).
 - Commander: low-battery → `set_mode RTL` verified end-to-end (forced via `BATTERY_LOW_THRESHOLD=1.0`).
+- perception-lidar: subscribes to `/lidar/points`, publishes `/perception/lidar/detections` (`atl4s_msgs/LidarDetectionArray`). Runtime config from `config/pipelines/perception-lidar.yaml`. DBSCAN + per-class shape priors (aircraft, tank). No live `/lidar/points` source on the VM; verified end-to-end against `scripts/publish-fake-lidar.sh` — Pipelines card flips to Running, detections stream at 5 Hz, dashboard `/ws/ros/sample` deserializes the atl4s_msgs payload correctly.
 - rosbag-manager: HTTP API on `127.0.0.1:8086` for record / upload / GCS browser / replay. Smoke tested end-to-end via `./scripts/bag-record.sh` — record subprocess + watcher upload + GCS confirmed; replay downloads from GCS, plays, and cleans up `${REPLAY_DIR}`.
 - dashboard: operator UI on `:8089` with HTTP Basic via `BAG_WEB_USER` / `BAG_WEB_PASS`. Apple-style sidebar shell, design-token CSS (light/dark via `prefers-color-scheme`). Pages: **Home** (overview wired to every dedicated API — stat strip with battery / mode / pipelines-running, cards for Robots / Health / Pipelines / Rosbags driven by their respective registries, active-task pill banner when a record or replay is in flight), **Robots** (YAML-driven registry; clicking a robot shows per-robot telemetry strip, Leaflet map scoped to its GPS topic, JPEG camera viewport, and a topics table — Gazebo Drone live today, Orin Drone registered offline), **Pipelines** (YAML-driven perception / fusion service registry; per-pipeline status, inline Start/Stop via docker.sock, "Run on bag" action that replays any GCS bag through the running pipeline, config form generated from the registry schema with typed fields — string / number / slider / boolean / select / list\_string — persisted to `config/pipelines/{id}.yaml`. Ships with `perception-lidar` declared and ready to receive the upcoming service), **Rosbag Manager** (one unified surface — GCS + local bags fused into a single table with inline per-row actions, persistent active-record / active-replay strip, New Recording + Upload modals), **ROS** (full topic graph from the rclpy node — every topic on the bus with type, pub/sub counts, per-endpoint QoS, and click-to-inspect that opens a transient sample WebSocket on `/ws/ros/sample/{topic}`), **Health** (per-container state from the host Docker daemon via mounted `/var/run/docker.sock:ro` + per-topic liveness computed from the dashboard's own topic-bridge timestamps; combined aggregate drives the sidebar badge). All `/api/*` calls stream-proxy to `rosbag-manager`; `/ws/topics`, `/ws/camera/{robot_id}`, and `/ws/ros/sample/{topic}` bridge rclpy subscribers from a daemon thread. Adding a robot or a pipeline is a `services/dashboard/config/{robots,pipelines}.yaml` edit + `docker compose restart dashboard`. Foxglove Studio deep link on Home, Robots detail, active-replay strip.
 
@@ -184,7 +187,15 @@ Two harmless messages on every `atl4s-gazebo` start:
 
 ### Compose volume merge
 
-Same trap as the env merge above: a service-level `volumes:` list silently replaces `x-common.volumes`. Any service that adds its own volume mounts must re-declare the FastDDS profile mount or lose it. `rosbag-manager` and `dashboard` both do this with a one-line comment at the call site.
+Same trap as the env merge above: a service-level `volumes:` list silently replaces `x-common.volumes`. Any service that adds its own volume mounts must re-declare the FastDDS profile mount or lose it. `rosbag-manager`, `dashboard`, and `perception-lidar` all do this with a one-line comment at the call site.
+
+### Shared message packages → repo-root build context
+
+Three services (`dashboard`, `foxglove`, `perception-lidar`) use `shared/atl4s_msgs/` and therefore declare `build.context: .` + `build.dockerfile: services/<svc>/Dockerfile` in compose, rather than the standard `context: ./services/<svc>`. Their Dockerfiles `COPY shared/atl4s_msgs /workspace/src/atl4s_msgs` and `colcon build --packages-select atl4s_msgs --merge-install`; the entrypoint sources `/workspace/install/setup.bash` on top of `/opt/ros/humble/setup.bash`.
+
+Any future service that publishes or subscribes to an `atl4s_msgs/*` type follows the same pattern. Without it the type won't deserialize and the topic appears blank in Foxglove + the dashboard's ROS-page sampler.
+
+A repo-root `.dockerignore` keeps the three context=. builds from shipping the whole repo (data/, .git, node_modules, **/dist) to the Docker daemon every build.
 
 ### ROS `byte` field → 1-char string in JSON
 
@@ -210,10 +221,10 @@ The topic bridge (`services/dashboard/backend/topics.py`) calls `node.get_topic_
 | 6 | `commander` | running | always | Autonomy. Low-battery latch → `/mavros/set_mode RTL`. Threshold via `BATTERY_LOW_THRESHOLD`. |
 | 7 | `rosbag-manager` | running | always | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser (list / upload / download / delete), and replay via `ros2 bag play`. Binds `127.0.0.1:8086` (loopback only). `FROM ros:humble`. Consumed by `dashboard`, `scripts/bag-record.sh`, and any future caller on the host. |
 | 8 | `dashboard` | running | always | Single human-facing surface on TCP 8089 with HTTP Basic (`BAG_WEB_USER` / `BAG_WEB_PASS`). Streaming proxy to `rosbag-manager` under `/api/*`; `/ws/topics` + per-robot `/ws/camera/{robot_id}` + per-topic `/ws/ros/sample/{topic}` rclpy bridges in a daemon thread. Owns the formerly-standalone healthcheck role: combines per-container state (via mounted `/var/run/docker.sock:ro`) + per-topic liveness into `GET /api/health`. Apple-style sidebar shell, full redesign complete (phases 1–7). Tabs: **Home** (overview wired to every API; active-task pill banner during record/replay), **Robots** (YAML registry — `config/robots.yaml`), **Pipelines** (YAML registry — `config/pipelines.yaml`; schema-driven config form persisted to `config/pipelines/{id}.yaml`; Start/Stop via docker.sock; per-card "Run on bag" replays any GCS bag through the running pipeline), **Rosbag Manager** (one merged page — GCS + local bags fused, persistent record/replay strip, modals for new recording + upload), **ROS** (full topic graph + click-to-inspect), **Health** (containers + topic liveness). React + Vite + TS frontend (lucide-react icons, design-token CSS); FastAPI + rclpy backend in one image. |
-| 9 | `perception-detector` | planned | — | YOLO on `/camera/image`, L4 GPU. First use of `shared/atl4s_msgs/`. |
-| 10 | `perception-segmenter` | planned | — | Segmentation. |
-| 11 | `perception-fault` | planned | — | Fault / anomaly detection. |
-| 12 | `perception-lidar` | planned | — | Point-cloud processing, once a lidar source exists (Gazebo gpu_lidar back-pressures the FDM loop — see Open items). |
+| 9 | `perception-lidar` | running (no input yet) | always | First perception service + first user of `shared/atl4s_msgs/`. Subscribes to `/lidar/points` (`sensor_msgs/PointCloud2`); publishes `/perception/lidar/detections` (`atl4s_msgs/LidarDetectionArray`). Classical scaffold today: DBSCAN cluster → AABB → per-class shape priors (aircraft = elongated + flat, tank = compact + cubic). Runtime config read from `services/dashboard/config/pipelines/perception-lidar.yaml` (the file the dashboard's Pipelines form writes). `_classify` / `_score` in `lidar_detector.py` are the swap-in points for a learned model later. No live lidar source on the VM today; use `scripts/publish-fake-lidar.sh` to drive synthetic frames. |
+| 10 | `perception-detector` | planned | — | YOLO on `/camera/image`, L4 GPU. |
+| 11 | `perception-segmenter` | planned | — | Segmentation. |
+| 12 | `perception-fault` | planned | — | Fault / anomaly detection. |
 | 13 | `fusion` | planned | — | Combines perception + pose into tracks / events. |
 | 14 | `event-publisher` | planned | — | Application events → GCP Pub/Sub. |
 | 15 | `ingestion` | planned | — | Zenoh bridge for ROS topics over WAN from the Orin (last). |
@@ -230,7 +241,9 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
 ## Open items
 
 1. **Dashboard redesign — complete.** Apple-style sidebar shell + new IA (Home / Robots / Pipelines / Rosbag Manager / ROS / Health) shipped in phase 1 (`c951cd9`). Robot registry (YAML-driven) + per-robot telemetry / Leaflet map / JPEG camera / topic table in phase 2 (`43f3533`); legacy `/live` and `/map` deleted. Full ROS topic graph + on-demand sample inspector in phase 3 (`5bc8d2a`). Per-container + per-topic health, standalone `healthcheck` retired, in phase 4 (`0609de3`). Unified Rosbag Manager in phase 5 (`ec55ca7`). Pipelines registry + config form + Start/Stop/Restart in phase 6 (`6462ba1`); `perception-lidar` declared. "Run on bag" action on Pipelines cards (`ccde469`) and Home overview wired to all registry APIs with an active-task pill banner in phase 7 (`9e02bd9`).
-2. **First perception service — `perception-lidar` (next).** Stand up `shared/atl4s_msgs/` for lidar Detection types, then `services/perception-lidar` to process lidar scans for aircraft / tank classes. First use of the L4 GPU for inference. The dashboard side is already ready: the pipeline is declared in `services/dashboard/config/pipelines.yaml` and its runtime config in `services/dashboard/config/pipelines/perception-lidar.yaml` — the new service container needs to (a) be named `atl4s-perception-lidar`, (b) bind-mount the same `config/pipelines/` directory and read its config file at startup, (c) subscribe to `/lidar/points` and publish to `/perception/lidar/detections`. The dashboard's Pipelines page will then flip from "Not deployed" to "Running" and Start/Stop/Restart will work via docker.sock.
+2. **Real lidar input + learned detector for `perception-lidar`.** The service is wired and running today (`4d1408a`) with a DBSCAN + geometric-prior scaffold. Two follow-ups when the data arrives:
+    - **Input source.** No live lidar publishes `/lidar/points` on the VM yet. Synthetic frames via `scripts/publish-fake-lidar.sh` validate the wiring. Real options: (a) Orin's lidar via the future `ingestion` service (Zenoh), (b) revisit the parked Gazebo gpu_lidar attempt with a lighter ray budget, (c) replay a real lidar bag in.
+    - **Learned model.** Replace `_classify` / `_score` in `services/perception-lidar/lidar_detector.py` with a CUDA-backed PointPillars / CenterPoint / VoxelNet inference path (the config `model_variant` already selects between them; today it logs a warning that the value is a no-op). First use of the L4 GPU for inference. Needs aircraft/tank training data, since public KITTI/nuScenes checkpoints target car/pedestrian/cyclist instead.
 3. **More `commander` behaviors** — takeoff command, waypoint loop, geofence triggers, event publishing to `/atl4s/events`. Pure ROS 2 work, no new infrastructure.
 4. **Drone integration (Orin Nano)** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. Orin-side recording + upload calls `rosbag-manager`'s API to push real RealSense + lidar bags to GCS. Zenoh bridge for ROS topics over WAN comes at the end (`ingestion` service). The Orin Drone is already a first-class entry in the dashboard robot registry (offline until integration).
 5. **Lidar in Gazebo (parked).** Attempted: gpu_lidar block in `services/gazebo/world/models/atl4s_lidar/` + composite `iris_with_lidar` model + `atl4s.sdf` world. Even at 90×4 rays @ 1 Hz the render back-pressures the JSON-FDM loop — SITL logs continuous `No JSON sensor message received, resending servos`. Retry path: lighter ray budget (e.g. 16×1), async sensor rendering, or skip Gazebo lidar entirely and validate `perception-lidar` against real Orin/RealSense data later. Files were rolled back; not in the repo today.
@@ -250,6 +263,9 @@ docker compose --profile sim down         # stop everything
 ./scripts/bag-record.sh 30                # record 30s, wait for upload
 ./scripts/bag-list.sh                     # list bags in GCS
 curl -fsS -X POST 127.0.0.1:8086/api/uploads/<bag-name>  # force-upload one bag (e.g. drop bags in by hand)
+
+# Perception-lidar without a real lidar source
+./scripts/publish-fake-lidar.sh           # ~5 Hz synthetic /lidar/points (Ctrl-C to stop)
 
 # Logs
 docker compose logs -f

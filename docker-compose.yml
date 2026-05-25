@@ -101,19 +101,6 @@ services:
     depends_on:
       - mavros
 
-  healthcheck:
-    <<: *common
-    build:
-      context: ./services/healthcheck
-    image: atl4s/healthcheck:latest
-    container_name: atl4s-healthcheck
-    environment:
-      <<: *shared-env
-      HEALTHCHECK_REPORT_INTERVAL: ${HEALTHCHECK_REPORT_INTERVAL:-5.0}
-      HEALTHCHECK_HTTP_PORT: ${HEALTHCHECK_HTTP_PORT:-8088}
-    depends_on:
-      - mavros
-
   rosbag-manager:
     <<: *common
     build:
@@ -152,8 +139,12 @@ services:
     # YAML <<: merge does not deep-merge lists; re-declare the x-common
     # fastdds mount alongside the robot-registry bind so edits to
     # robots.yaml are picked up by `docker compose restart dashboard`.
+    # docker.sock is mounted read-only for per-container health (Health
+    # page + nav badge); this gives the dashboard container root-equivalent
+    # power over the host — acceptable behind HTTP Basic + closed firewall.
     volumes:
       - ./shared/fastdds_profiles.xml:/fastdds_profiles.xml:ro
       - ./services/dashboard/config:/app/config:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - rosbag-manager

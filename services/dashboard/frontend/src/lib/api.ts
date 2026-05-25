@@ -20,6 +20,41 @@ export type Robot = {
 
 export type RosEndpoint = { node: string; qos: string };
 
+// "idle" = registered but never seen (e.g. an offline robot in the registry).
+// Treated as informational; doesn't degrade the aggregate.
+export type HealthLevel = 'ok' | 'idle' | 'warn' | 'err';
+
+export type ContainerInfo = {
+  name: string;
+  state: string;
+  health: string | null;
+  level: HealthLevel;
+  started_at: string | null;
+  uptime_sec: number | null;
+  image: string | null;
+  restart_count: number;
+};
+
+export type TopicHealth = {
+  robot_id: string;
+  key: string;
+  topic: string;
+  level: HealthLevel;
+  message: string;
+  age_sec: number | null;
+  threshold_sec: number;
+  rate: number;
+};
+
+export type HealthSnapshot = {
+  level: HealthLevel;
+  summary: { ok: number; idle: number; warn: number; err: number };
+  docker_available: boolean;
+  containers: ContainerInfo[];
+  topics: TopicHealth[];
+  ts: number;
+};
+
 export type RosTopic = {
   name: string;
   types: string[];
@@ -110,6 +145,9 @@ export const api = {
 
   // ROS topic graph
   listRosTopics: () => request<RosTopic[]>('/api/ros/topics'),
+
+  // Health (per-container + per-topic, aggregated)
+  health: () => request<HealthSnapshot>('/api/health'),
 
   listBags: () => request<Bag[]>('/api/bags'),
   listFiles: (name: string) => request<BagFile[]>(`${bagPath(name)}/files`),

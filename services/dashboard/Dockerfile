@@ -29,7 +29,8 @@ RUN pip3 install --no-cache-dir \
         httpx==0.27.2 \
         python-multipart==0.0.12 \
         opencv-python-headless==4.10.0.84 \
-        pyyaml==6.0.2
+        pyyaml==6.0.2 \
+        docker==7.1.0
 
 ENV DASHBOARD_BIND=0.0.0.0
 ENV DASHBOARD_PORT=8089

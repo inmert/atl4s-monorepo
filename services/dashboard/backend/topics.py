@@ -21,7 +21,6 @@ import time
 from collections import deque
 from typing import Iterable, Optional
 
-from diagnostic_msgs.msg import DiagnosticArray
 from mavros_msgs.msg import State
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
@@ -47,10 +46,11 @@ _BE_QOS = QoSProfile(
     durability=QoSDurabilityPolicy.VOLATILE,
 )
 
-# Pipeline-wide topics that aren't tied to any one robot.
-BASE_TOPICS: list[tuple[str, type]] = [
-    ('/atl4s/health', DiagnosticArray),
-]
+# Pipeline-wide topics that aren't tied to any one robot. Currently empty —
+# /atl4s/health was retired when the standalone healthcheck service was
+# folded into the dashboard (topic-liveness is now computed from the
+# bridge's own `_timestamps` and surfaced via /api/health).
+BASE_TOPICS: list[tuple[str, type]] = []
 
 # Maps a telemetry-mapping key (from robots.yaml) to the ROS message class.
 # Camera frames are handled separately by the camera bridge.

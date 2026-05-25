@@ -7,7 +7,8 @@ import {
   Home as HomeIcon,
   Share2,
 } from 'lucide-react';
-import { TopicProvider, useTopic } from './lib/topics';
+import { TopicProvider } from './lib/topics';
+import { HealthProvider, useHealth } from './lib/health';
 import { Home } from './pages/Home';
 import { Robots } from './pages/Robots';
 import { RobotDetail } from './pages/RobotDetail';
@@ -25,27 +26,25 @@ const nav = [
   { to: '/health', label: 'Health', icon: Activity },
 ];
 
-function levelNum(level: unknown): number {
-  if (typeof level === 'number') return level;
-  if (typeof level === 'string' && level.length > 0) return level.charCodeAt(0);
-  return 0;
-}
-
 function HealthBadge() {
-  const health = useTopic('/atl4s/health');
-  if (!health) {
+  const { snap } = useHealth();
+  if (!snap) {
     return (
-      <span className="health-badge dim" title="no /atl4s/health yet">
+      <span className="health-badge dim" title="health pending">
         <span className="dot" /> idle
       </span>
     );
   }
-  const statuses = (health.data?.status || []) as Array<{ level: unknown }>;
-  const max = statuses.reduce((m, s) => Math.max(m, levelNum(s.level)), 0);
-  const tone = max === 0 ? 'ok' : max === 1 ? 'warn' : 'err';
-  const label = max === 0 ? 'Healthy' : max === 1 ? 'Warn' : max === 3 ? 'Stale' : 'Error';
+  const tone = snap.level;
+  const label =
+    snap.level === 'ok'
+      ? 'Healthy'
+      : snap.level === 'warn'
+        ? 'Warn'
+        : 'Error';
+  const title = `${snap.summary.ok} OK, ${snap.summary.warn} warn, ${snap.summary.err} err`;
   return (
-    <span className={`health-badge ${tone}`} title={`health: ${label}`}>
+    <span className={`health-badge ${tone}`} title={title}>
       <span className={`dot ${tone}`} /> {label}
     </span>
   );
@@ -81,20 +80,22 @@ function Sidebar() {
 export function App() {
   return (
     <TopicProvider>
-      <div className="app">
-        <Sidebar />
-        <main className="main">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/robots" element={<Robots />} />
-            <Route path="/robots/:id" element={<RobotDetail />} />
-            <Route path="/pipelines" element={<Pipelines />} />
-            <Route path="/rosbags/*" element={<RosbagManager />} />
-            <Route path="/ros" element={<Ros />} />
-            <Route path="/health" element={<Health />} />
-          </Routes>
-        </main>
-      </div>
+      <HealthProvider>
+        <div className="app">
+          <Sidebar />
+          <main className="main">
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/robots" element={<Robots />} />
+              <Route path="/robots/:id" element={<RobotDetail />} />
+              <Route path="/pipelines" element={<Pipelines />} />
+              <Route path="/rosbags/*" element={<RosbagManager />} />
+              <Route path="/ros" element={<Ros />} />
+              <Route path="/health" element={<Health />} />
+            </Routes>
+          </main>
+        </div>
+      </HealthProvider>
     </TopicProvider>
   );
 }

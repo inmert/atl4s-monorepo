@@ -7,22 +7,17 @@ import {
   Cpu,
   ExternalLink,
 } from 'lucide-react';
-import { useTopic, useTopics } from '../lib/topics';
+import { useTopics } from '../lib/topics';
+import { useHealth } from '../lib/health';
 import { api, type Bag, type Robot } from '../lib/api';
 import { foxgloveStudioUrl } from '../lib/foxglove';
 import { formatBytes, formatDate } from '../lib/format';
 import { iconFor, isOnline, summarize } from '../lib/robots';
 import { Badge, Card, PageHeader, StatTile, StatusDot } from '../lib/components';
 
-function levelNum(level: unknown): number {
-  if (typeof level === 'number') return level;
-  if (typeof level === 'string' && level.length > 0) return level.charCodeAt(0);
-  return 0;
-}
-
 export function Home() {
-  const health = useTopic('/atl4s/health');
   const { topics } = useTopics();
+  const { snap: health } = useHealth();
 
   const [robots, setRobots] = useState<Robot[] | null>(null);
   const [bags, setBags] = useState<Bag[] | null>(null);
@@ -38,12 +33,6 @@ export function Home() {
   const primaryRobot = (robots || []).find((r) => isOnline(r, topics));
   const state = primaryRobot?.telemetry.state ? topics[primaryRobot.telemetry.state]?.data : undefined;
   const battery = primaryRobot?.telemetry.battery ? topics[primaryRobot.telemetry.battery]?.data : undefined;
-
-  // Health summary
-  const statuses = (health?.data?.status || []) as Array<{ level: unknown; name: string }>;
-  const ok = statuses.filter((s) => levelNum(s.level) === 0).length;
-  const warn = statuses.filter((s) => levelNum(s.level) === 1).length;
-  const err = statuses.filter((s) => levelNum(s.level) >= 2).length;
 
   // Pipelines: count discovered perception / fusion outputs
   const perceptionTopics = Object.values(topics).filter(
@@ -139,20 +128,21 @@ export function Home() {
           right={<Link to="/health" className="dim">Details →</Link>}
         >
           {!health ? (
-            <p className="placeholder">
-              Waiting for <code>/atl4s/health</code>…
-            </p>
+            <p className="placeholder">Loading…</p>
           ) : (
             <div className="stack" style={{ gap: 12 }}>
               <div className="row" style={{ gap: 8 }}>
-                <Badge tone="ok">{ok} OK</Badge>
-                {warn > 0 && <Badge tone="warn">{warn} warn</Badge>}
-                {err > 0 && <Badge tone="err">{err} error</Badge>}
+                <Badge tone="ok">{health.summary.ok} OK</Badge>
+                {health.summary.idle > 0 && <Badge tone="idle">{health.summary.idle} idle</Badge>}
+                {health.summary.warn > 0 && <Badge tone="warn">{health.summary.warn} warn</Badge>}
+                {health.summary.err > 0 && <Badge tone="err">{health.summary.err} error</Badge>}
               </div>
               <div className="dim" style={{ fontSize: 12 }}>
-                Aggregated over {statuses.length} tracked topic
-                {statuses.length === 1 ? '' : 's'}. Last update at{' '}
-                {new Date((health.ts ?? 0) * 1000).toLocaleTimeString()}.
+                {health.containers.length} container
+                {health.containers.length === 1 ? '' : 's'} ·{' '}
+                {health.topics.length} topic
+                {health.topics.length === 1 ? '' : 's'} tracked.
+                {!health.docker_available && ' Docker socket unavailable.'}
               </div>
             </div>
           )}

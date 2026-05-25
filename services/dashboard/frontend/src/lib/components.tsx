@@ -66,17 +66,19 @@ export function StatTile({
   );
 }
 
+export type Tone = 'ok' | 'idle' | 'warn' | 'err' | 'accent';
+
 export function Badge({
   tone,
   children,
 }: {
-  tone?: 'ok' | 'warn' | 'err' | 'accent';
+  tone?: Tone;
   children: ReactNode;
 }) {
   return <span className={`badge${tone ? ` ${tone}` : ''}`}>{children}</span>;
 }
 
-export function StatusDot({ tone }: { tone?: 'ok' | 'warn' | 'err' }) {
+export function StatusDot({ tone }: { tone?: Tone }) {
   return <span className={`dot${tone ? ` ${tone}` : ''}`} />;
 }
 

@@ -18,7 +18,7 @@ Phased Apple-style redesign in progress. Phase 1 (sidebar shell + new IA + desig
 | `/rosbags` (Browse) | GCS bag list, multipart upload, delete, expandable per-bag panel with parsed `metadata.yaml` (duration, message count, per-topic counts) and file list with download links. |
 | `/rosbags/record` | Start/stop a recording (optional name / topics / duration), live status, local bag table with upload state + force-upload. |
 | `/rosbags/replay` | Bag dropdown, start/stop, status, Foxglove deep link. |
-| `/ros` | Curated topics grouped by namespace, with rate + last update. Phase 3: full ROS graph (every publisher / subscriber, QoS, on-demand sampling). |
+| `/ros` | Full ROS topic graph from the rclpy node. Namespace-grouped cards with collapsible sections, type-aware filter, per-topic pub / sub counts. Click a row to open the inspector: per-endpoint node + QoS badge, plus a live sample drawer that opens `/ws/ros/sample/{topic}` and streams the latest message JSON with rate. |
 | `/health` | `DiagnosticArray` from `/atl4s/health` with per-topic level / message / key-value pairs. Nav badge reflects worst level. Phase 4: gains per-container Docker state via mounted `/var/run/docker.sock`. |
 
 ## HTTP + WebSocket surfaces
@@ -28,9 +28,11 @@ Phased Apple-style redesign in progress. Phase 1 (sidebar shell + new IA + desig
 | `GET` | `/healthz` | Liveness; unauthenticated. |
 | `GET` | `/api/robots` | List robots from the registry (config + telemetry topic mapping). |
 | `GET` | `/api/robots/{id}` | One robot, or 404. |
+| `GET` | `/api/ros/topics` | Full topic graph from the rclpy node: every topic on the bus with its types, pub/sub counts, and per-endpoint node name + QoS. The dashboard's own subscriber is filtered out of the sub count. |
 | `*` | `/api/*` | Streaming proxy to `rosbag-manager` (see [services/rosbag-manager/README.md](../rosbag-manager/README.md)). HTTP Basic at the edge. |
 | `WS` | `/ws/topics` | Push curated ROS topic snapshots + rates as JSON deltas. Initial snapshot on connect. |
 | `WS` | `/ws/camera/{robot_id}` | Push JPEG-encoded frames from the robot's camera topic as binary WebSocket messages. 4404 close if the robot has no camera configured. |
+| `WS` | `/ws/ros/sample/{topic}` | Per-topic sample stream. Opens a transient Best-Effort subscription if not already subscribed; replays the last cached snapshot then streams every message as JSON. 4404 if the topic isn't on the bus or its type can't be resolved. Subscriptions are persistent on the backend (created on first sample, kept open across clients). |
 | `GET` | `/`, `/{path}` | Built SPA. SPA fallback for client-side routes. |
 
 ## Layout
@@ -47,7 +49,8 @@ services/dashboard/
 │   ├── auth.py            HTTP Basic (HTTP + WebSocket via header check)
 │   ├── proxy.py           streaming /api/* → rosbag-manager
 │   ├── robots.py          registry loader + /api/robots router
-│   ├── topics.py          rclpy thread → /ws/topics fan-out, subs from registry + base + /perception/* /fusion/* discovery
+│   ├── ros.py             /api/ros/topics graph endpoint + /ws/ros/sample/{topic} handler
+│   ├── topics.py          rclpy thread → /ws/topics broadcast + per-topic sample queues; subs from registry + base + /perception/* /fusion/* discovery + ad-hoc samples
 │   └── camera.py          rclpy thread → /ws/camera/{robot_id} JPEG fan-out (one subscription per unique camera topic)
 └── frontend/              React + Vite + TS (lucide-react icons)
     ├── package.json
@@ -121,6 +124,13 @@ Callbacks update an in-memory snapshot and push deltas to per-client `asyncio.Qu
 ## Camera bridge
 
 `backend/camera.py` opens one `sensor_msgs/Image` subscription per unique `telemetry.camera` topic across the registry, re-encodes each frame to JPEG (quality 70) with OpenCV, and fans out to clients via `/ws/camera/{robot_id}`. The endpoint resolves the robot's camera topic from the registry; a `4404` close means no camera is configured for that robot.
+
+## ROS graph + sampling
+
+`backend/ros.py` exposes two surfaces backed by the topic bridge's rclpy node:
+
+- `GET /api/ros/topics` walks the graph via `get_topic_names_and_types()` + `get_publishers/subscriptions_info_by_topic()`. Cheap (graph state is cached locally by the middleware). The dashboard frontend polls this every 5 s on the ROS page.
+- `WS /ws/ros/sample/{topic}` opens a per-socket queue routed off the topic bridge's `_on_message`. If the topic isn't already in the bridge's subscription set (i.e. not in the registry's telemetry mappings, not `/atl4s/health`, not a discovered `/perception/*` / `/fusion/*`), the type is resolved from the graph via `rosidl_runtime_py.utilities.get_message()` and a new Best-Effort subscription is created. Subscriptions are persistent — once sampled, the topic is kept subscribed even after the last client leaves. Memory grows once per topic, not per client.
 
 ## Inspecting
 

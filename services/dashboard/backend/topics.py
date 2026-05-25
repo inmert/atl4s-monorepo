@@ -25,9 +25,15 @@ from rclpy.qos import (
     QoSReliabilityPolicy,
 )
 from rosidl_runtime_py import message_to_ordereddict
+from rosidl_runtime_py.utilities import get_message
 from sensor_msgs.msg import BatteryState, Imu, NavSatFix
 
 log = logging.getLogger('dashboard.topics')
+
+# Namespaces auto-subscribed when their topics appear on the bus. Keeps
+# perception/fusion outputs flowing to the dashboard without restarts.
+DISCOVERY_PREFIXES = ('/perception/', '/fusion/')
+DISCOVERY_PERIOD_SEC = 5.0
 
 _BE_QOS = QoSProfile(
     history=QoSHistoryPolicy.KEEP_LAST,
@@ -56,6 +62,7 @@ class TopicBridge:
         self.state: dict[str, dict] = {}
         self._timestamps: dict[str, deque] = {}
         self._subscribers: set[asyncio.Queue] = set()
+        self._discovered: set[str] = set()
         self._node: Optional[Node] = None
         self._executor: Optional[SingleThreadedExecutor] = None
         self._thread: Optional[threading.Thread] = None
@@ -81,15 +88,11 @@ class TopicBridge:
         try:
             self._node = Node('atl4s_dashboard_topics')
             for topic, msg_type in TOPICS:
-                self._node.create_subscription(
-                    msg_type, topic,
-                    lambda msg, t=topic: self._on_message(t, msg),
-                    _BE_QOS,
-                )
-                self._timestamps[topic] = deque(maxlen=20)
+                self._subscribe(topic, msg_type)
+            self._node.create_timer(DISCOVERY_PERIOD_SEC, self._discover)
             self._executor = SingleThreadedExecutor()
             self._executor.add_node(self._node)
-            log.info('subscribed to %d topics', len(TOPICS))
+            log.info('subscribed to %d topics; discovering %s', len(TOPICS), DISCOVERY_PREFIXES)
             while self._running:
                 self._executor.spin_once(timeout_sec=0.1)
         except Exception:
@@ -97,6 +100,35 @@ class TopicBridge:
         finally:
             if self._node is not None:
                 self._node.destroy_node()
+
+    def _subscribe(self, topic: str, msg_type) -> None:
+        assert self._node is not None
+        self._node.create_subscription(
+            msg_type, topic,
+            lambda msg, t=topic: self._on_message(t, msg),
+            _BE_QOS,
+        )
+        self._timestamps.setdefault(topic, deque(maxlen=20))
+        self._discovered.add(topic)
+
+    def _discover(self) -> None:
+        if self._node is None:
+            return
+        for name, types in self._node.get_topic_names_and_types():
+            if name in self._discovered:
+                continue
+            if not any(name.startswith(p) for p in DISCOVERY_PREFIXES):
+                continue
+            if not types:
+                continue
+            try:
+                msg_class = get_message(types[0])
+            except Exception:
+                log.warning('cannot resolve type %s for %s; skipping', types[0], name)
+                self._discovered.add(name)  # don't retry every cycle
+                continue
+            self._subscribe(name, msg_class)
+            log.info('discovered %s (%s)', name, types[0])
 
     def _on_message(self, topic: str, msg) -> None:
         now = time.time()

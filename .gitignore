@@ -1,0 +1,44 @@
+
+# ATL4S additions
+.env
+.env.local
+*.key
+*.pem
+service-account-*.json
+
+# ROS build artifacts
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Node (web frontend later)
+node_modules/
+dist/
+.next/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Recorded bags (large — store in GCS, not git)
+data/bags/
+*.mcap
+*.db3
+*.bag
+
+# Container build cache
+.docker/
+
+# Logs
+*.log
+logs/

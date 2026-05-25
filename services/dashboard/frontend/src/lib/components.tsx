@@ -2,7 +2,7 @@
 // chrome. Anything that grows page-specific stays in the page file.
 
 import type { ReactNode } from 'react';
-import type { LucideIcon } from 'lucide-react';
+import { X, type LucideIcon } from 'lucide-react';
 
 export function PageHeader({
   title,
@@ -96,6 +96,36 @@ export function EmptyState({
       {Icon && <Icon className="empty-icon" />}
       <div className="empty-title">{title}</div>
       {children && <div>{children}</div>}
+    </div>
+  );
+}
+
+export function Modal({
+  title,
+  onClose,
+  children,
+  width,
+}: {
+  title: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+  width?: number | string;
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal"
+        onClick={(e) => e.stopPropagation()}
+        style={width ? { maxWidth: width } : undefined}
+      >
+        <div className="modal-header">
+          <h2>{title}</h2>
+          <button className="ghost icon-only" onClick={onClose} title="Close">
+            <X size={14} />
+          </button>
+        </div>
+        <div className="modal-body">{children}</div>
+      </div>
     </div>
   );
 }

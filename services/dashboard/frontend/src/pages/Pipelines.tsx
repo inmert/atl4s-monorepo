@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Cpu,
+  Disc,
   Play,
   RefreshCw,
   Save,
@@ -21,13 +22,16 @@ import {
 } from 'lucide-react';
 import {
   api,
+  type Bag,
   type HealthLevel,
   type Pipeline,
   type PipelineDetail,
   type PipelineField,
+  type ReplayStatus,
 } from '../lib/api';
 import { useTopics } from '../lib/topics';
-import { Badge, Card, EmptyState, PageHeader, StatusDot } from '../lib/components';
+import { Badge, Card, EmptyState, Modal, PageHeader, StatusDot } from '../lib/components';
+import { formatBytes, formatDate } from '../lib/format';
 
 const POLL_MS = 5000;
 
@@ -52,12 +56,16 @@ const LEVEL_LABEL: Record<HealthLevel, string> = {
 
 export function Pipelines() {
   const [pipelines, setPipelines] = useState<Pipeline[] | null>(null);
+  const [replayStatus, setReplayStatus] = useState<ReplayStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [runOnBagFor, setRunOnBagFor] = useState<Pipeline | null>(null);
 
   const refresh = async () => {
     try {
-      setPipelines(await api.listPipelines());
+      const [list, rs] = await Promise.all([api.listPipelines(), api.replayStatus()]);
+      setPipelines(list);
+      setReplayStatus(rs);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -69,6 +77,9 @@ export function Pipelines() {
     const id = window.setInterval(refresh, POLL_MS);
     return () => window.clearInterval(id);
   }, []);
+
+  const replayBag = replayStatus && replayStatus.state !== 'idle' ? replayStatus.bag : null;
+  const replayBusy = Boolean(replayBag);
 
   return (
     <section>
@@ -105,9 +116,25 @@ export function Pipelines() {
               onToggle={() => setExpanded((cur) => (cur === p.id ? null : p.id))}
               onAction={refresh}
               onError={setError}
+              onRunOnBag={() => setRunOnBagFor(p)}
+              replayBag={replayBag}
+              replayBusy={replayBusy}
             />
           ))}
         </div>
+      )}
+
+      {runOnBagFor && (
+        <RunOnBagModal
+          pipeline={runOnBagFor}
+          replayBusy={replayBusy}
+          onClose={() => setRunOnBagFor(null)}
+          onStarted={async () => {
+            setRunOnBagFor(null);
+            await refresh();
+          }}
+          onError={setError}
+        />
       )}
     </section>
   );
@@ -119,12 +146,18 @@ function PipelineCard({
   onToggle,
   onAction,
   onError,
+  onRunOnBag,
+  replayBag,
+  replayBusy,
 }: {
   pipeline: Pipeline;
   expanded: boolean;
   onToggle: () => void;
   onAction: () => Promise<void>;
   onError: (msg: string) => void;
+  onRunOnBag: () => void;
+  replayBag: string | null;
+  replayBusy: boolean;
 }) {
   const Icon = iconFor(pipeline.icon);
   const { state, level, message } = pipeline.status;
@@ -188,6 +221,21 @@ function PipelineCard({
           </div>
         </div>
         <div className="row" style={{ gap: 6 }} onClick={(e) => e.stopPropagation()}>
+          <button
+            className="ghost"
+            onClick={onRunOnBag}
+            disabled={!running || replayBusy}
+            title={
+              !running
+                ? 'Start the pipeline first'
+                : replayBusy
+                  ? `Another replay is active (${replayBag || ''})`
+                  : 'Replay a recorded bag through this pipeline'
+            }
+          >
+            <Disc size={13} style={{ marginRight: 4 }} />
+            Run on bag
+          </button>
           {running ? (
             <button className="danger" onClick={doStop}>
               <Square size={13} style={{ marginRight: 4 }} />
@@ -212,6 +260,99 @@ function PipelineCard({
         </div>
       )}
     </Card>
+  );
+}
+
+function RunOnBagModal({
+  pipeline,
+  replayBusy,
+  onClose,
+  onStarted,
+  onError,
+}: {
+  pipeline: Pipeline;
+  replayBusy: boolean;
+  onClose: () => void;
+  onStarted: () => Promise<void>;
+  onError: (msg: string) => void;
+}) {
+  const [bags, setBags] = useState<Bag[] | null>(null);
+  const [selected, setSelected] = useState<string>('');
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    api
+      .listBags()
+      .then((b) => {
+        const sorted = [...b].sort((a, b) =>
+          (b.updated || '').localeCompare(a.updated || ''),
+        );
+        setBags(sorted);
+        if (sorted.length && !selected) setSelected(sorted[0].name);
+      })
+      .catch((e) => onError((e as Error).message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const submit = async () => {
+    if (!selected) return;
+    setSubmitting(true);
+    try {
+      await api.replayStart(selected);
+      await onStarted();
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal title={`Run on bag — ${pipeline.name}`} onClose={onClose}>
+      <div className="stack" style={{ gap: 12 }}>
+        <p className="hint" style={{ margin: 0 }}>
+          Replays the selected bag onto the DDS bus. Any running pipeline whose
+          input topic overlaps with the bag's topics — including <code className="mono">
+            {pipeline.input_topics[0] || '—'}
+          </code> for this one — will consume the messages and produce outputs.
+        </p>
+        {replayBusy && (
+          <p className="error">
+            Another replay is already active. Stop it from Rosbag Manager first.
+          </p>
+        )}
+        <label>
+          <span className="config-field-label">Bag from GCS</span>
+          {bags === null ? (
+            <p className="placeholder">Loading…</p>
+          ) : bags.length === 0 ? (
+            <p className="placeholder">
+              No bags in GCS yet. Record or upload one from Rosbag Manager.
+            </p>
+          ) : (
+            <select value={selected} onChange={(e) => setSelected(e.target.value)}>
+              {bags.map((b) => (
+                <option key={b.name} value={b.name}>
+                  {b.name} — {formatBytes(b.size_bytes)} · {formatDate(b.updated)}
+                </option>
+              ))}
+            </select>
+          )}
+        </label>
+        <div className="form-actions">
+          <button
+            onClick={submit}
+            disabled={!selected || submitting || replayBusy}
+          >
+            <Disc size={13} style={{ marginRight: 4 }} />
+            {submitting ? 'Starting…' : 'Start replay'}
+          </button>
+          <button className="ghost" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

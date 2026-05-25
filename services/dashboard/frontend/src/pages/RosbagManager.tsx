@@ -23,7 +23,6 @@ import {
   Trash2,
   Upload as UploadIcon,
   UploadCloud,
-  X,
 } from 'lucide-react';
 import {
   api,
@@ -36,7 +35,7 @@ import {
 } from '../lib/api';
 import { formatBytes, formatDate } from '../lib/format';
 import { foxgloveStudioUrl } from '../lib/foxglove';
-import { Badge, Card, EmptyState, PageHeader, StatusDot } from '../lib/components';
+import { Badge, Card, EmptyState, Modal, PageHeader, StatusDot } from '../lib/components';
 
 const POLL_MS = 3000;
 
@@ -572,30 +571,6 @@ function BagDetails({
             </tbody>
           </table>
         )}
-      </div>
-    </div>
-  );
-}
-
-function Modal({
-  title,
-  onClose,
-  children,
-}: {
-  title: ReactNode;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>{title}</h2>
-          <button className="ghost icon-only" onClick={onClose} title="Close">
-            <X size={14} />
-          </button>
-        </div>
-        <div className="modal-body">{children}</div>
       </div>
     </div>
   );

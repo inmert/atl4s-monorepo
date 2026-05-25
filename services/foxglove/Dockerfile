@@ -18,6 +18,7 @@ ENV FOXGLOVE_ADDRESS=0.0.0.0
 
 EXPOSE 8765/tcp
 
+COPY params.yaml /params.yaml
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

@@ -3,6 +3,14 @@
 #
 # Source topic names come from `gz topic -l` against the live atl4s-gazebo
 # container. ROS 2 names are stable contracts the rest of the stack relies on.
+#
+# QoS notes:
+#  - /imu/gazebo and /clock are high-rate (~600 Hz). Reliable QoS at that rate
+#    causes the WebSocket forwarder (Foxglove Studio) to back-pressure and
+#    drop messages with "A message was lost!!!" warnings. Best Effort lets the
+#    DDS layer drop on overflow instead, which is the right behaviour for
+#    high-rate sensor streams.
+#  - /camera/image is ~5 Hz; Reliable is fine.
 
 - ros_topic_name: /camera/image
   gz_topic_name: /world/iris_runway/model/iris_with_gimbal/model/gimbal/link/pitch_link/sensor/camera/image
@@ -21,9 +29,11 @@
   ros_type_name: sensor_msgs/msg/Imu
   gz_type_name: gz.msgs.IMU
   direction: GZ_TO_ROS
+  publisher_queue_size: 200
 
 - ros_topic_name: /clock
   gz_topic_name: /world/iris_runway/clock
   ros_type_name: rosgraph_msgs/msg/Clock
   gz_type_name: gz.msgs.Clock
   direction: GZ_TO_ROS
+  publisher_queue_size: 200

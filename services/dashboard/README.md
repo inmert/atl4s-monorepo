@@ -14,10 +14,7 @@ Phased Apple-style redesign in progress. Phase 1 (sidebar shell + new IA + desig
 | `/robots` | Device registry from `config/robots.yaml`. Card per robot with kind, live online dot, and one-line state summary. |
 | `/robots/:id` | Per-robot detail: telemetry stat strip (state, mode, armed, battery, voltage, lat/lon), Leaflet map scoped to the robot's `gps` topic with 1000-point trail, JPEG camera viewport over `/ws/camera/{robot_id}`, telemetry topic table with rate + last-update, Foxglove deep link. |
 | `/pipelines` | Today: auto-discovers `/perception/*` and `/fusion/*` and offers a bag-against-pipeline replay. Phase 6: becomes a perception-service config + on/off toggle UI (e.g. lidar detection threshold, target classes); config persisted to YAML. |
-| `/rosbags` | Rosbag Manager — segmented sub-nav over the three bag operations. |
-| `/rosbags` (Browse) | GCS bag list, multipart upload, delete, expandable per-bag panel with parsed `metadata.yaml` (duration, message count, per-topic counts) and file list with download links. |
-| `/rosbags/record` | Start/stop a recording (optional name / topics / duration), live status, local bag table with upload state + force-upload. |
-| `/rosbags/replay` | Bag dropdown, start/stop, status, Foxglove deep link. |
+| `/rosbags` | Rosbag Manager — one merged surface. Single table fusing `/api/bags` (GCS) and `/api/uploads` (local stage) on name, sorted newest-first. Per-row "Where" badge: GCS / Local · pending / Uploading / Recording / Replaying. Per-row inline actions are context-aware (Replay / Stop replay / Upload now / Stop recording / Delete). Persistent strip at the top while a record or replay is active, with Stop + Foxglove deep-link. Header buttons: New Recording (modal) + Upload (modal). Expanding a row keeps the metadata.yaml + file-list drawer with download links. Old `/rosbags/{record,replay}` sub-routes still resolve to the same page so saved tabs don't 404. |
 | `/ros` | Full ROS topic graph from the rclpy node. Namespace-grouped cards with collapsible sections, type-aware filter, per-topic pub / sub counts. Click a row to open the inspector: per-endpoint node + QoS badge, plus a live sample drawer that opens `/ws/ros/sample/{topic}` and streams the latest message JSON with rate. |
 | `/health` | Two cards. **Containers** — every `atl4s-*` container from the host Docker daemon (via mounted `/var/run/docker.sock:ro`) with state, health, uptime, restart count, derived level. **Topic liveness** — per-registry-telemetry-topic age + rate, level OK/IDLE/WARN/ERR. Aggregate badge in the page header and sidebar reflects the worst level (IDLE doesn't degrade — an offline robot in the registry isn't a fault). Combined snapshot at `GET /api/health`. |
 
@@ -75,7 +72,6 @@ services/dashboard/
         │   ├── foxglove.ts  deep-link builder
         │   └── components.tsx  PageHeader, Card, StatTile, Badge, StatusDot, EmptyState, Subnav
         └── pages/           Home / Robots / RobotDetail / Pipelines / RosbagManager / Ros / Health
-                             plus Bags, Record, Replay (mounted inside RosbagManager)
 ```
 
 ## Configuration

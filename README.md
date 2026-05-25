@@ -25,7 +25,8 @@ atl4s-monorepo/
 │   ├── foxglove/             ROS 2 topics → WebSocket on TCP 8765
 │   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
 │   ├── bag-record/           Records selected topics to mcap (record profile)
-│   └── uploader/             Pushes completed bags to GCS (record profile)
+│   ├── uploader/             Pushes completed bags to GCS (record profile)
+│   └── gazebo/               Gazebo Harmonic + ArduPilot SITL plugin, headless on L4 GPU
 ├── shared/                   FastDDS XML profile shared by all ROS containers
 ├── deploy/                   (Terraform, planned)
 └── scripts/                  dev-up.sh, prod-up.sh, topic-check.sh,
@@ -71,6 +72,8 @@ See [HANDOFF.md](HANDOFF.md) for the working context and open items.
 | `commander` | running | Autonomy node. Low-battery latch → `set_mode RTL`. |
 | `bag-record` | running | Records selected ROS 2 topics to mcap. `record` profile. |
 | `uploader` | running | Pushes completed bags to `gs://atl4s-rosbags`. `record` profile. |
+| `gazebo` | running (B.1) | Gazebo Harmonic + ArduPilot SITL plugin. Iris with camera/IMU/GPS in a world. SITL connection wiring is B.2. |
+| `gz-bridge` | planned (B.2) | `ros_gz_bridge` mapping Gazebo sensor topics → ROS 2 topics. |
 | `web-backend` | planned | FastAPI WebSocket service for the custom dashboard. |
 | `web-frontend` | planned | Browser dashboard. |
 | `bag-replay` | planned | Replays a GCS-stored bag back onto the DDS bus. |

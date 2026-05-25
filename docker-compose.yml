@@ -33,6 +33,25 @@ services:
       MAVPROXY_OUT: ${MAVPROXY_OUT:-udp:127.0.0.1:14550}
     profiles: ["sim"]
 
+  gazebo:
+    <<: *common
+    build:
+      context: ./services/gazebo
+    image: atl4s/gazebo:latest
+    container_name: atl4s-gazebo
+    environment:
+      GZ_WORLD: ${GZ_WORLD:-iris_runway.sdf}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: graphics,compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles: ["sim"]
+
   mavros:
     <<: *common
     build:

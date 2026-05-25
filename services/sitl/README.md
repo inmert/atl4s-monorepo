@@ -16,9 +16,9 @@ The entrypoint launches both, then `wait -n` exits the container if either dies 
 | Endpoint | Direction | Consumer |
 |---|---|---|
 | TCP `127.0.0.1:5760` | listening | MAVProxy (in-container) |
-| UDP `127.0.0.1:14550` | `udpout` from MAVProxy | `mavros` |
+| UDP `127.0.0.1:14550` | bidirectional (`udp:` from MAVProxy) | `mavros` |
 
-The container uses `network_mode: host`, so `127.0.0.1` resolves to the VM loopback. MAVProxy uses `udpout:` (one-way). Switch to `udp:` (bidirectional) before any service needs to send commands back to the autopilot.
+The container uses `network_mode: host`, so `127.0.0.1` resolves to the VM loopback. MAVProxy uses `udp:` (bidirectional) — it binds a local ephemeral port, sends from it to MAVROS, and listens for replies on it. MAVROS commands round-trip back to ArduPilot. Use `udpout:` only if you explicitly want a send-only channel.
 
 ## Configuration
 
@@ -29,7 +29,7 @@ The container uses `network_mode: host`, so `127.0.0.1` resolves to the VM loopb
 | `SITL_HOME_ALT` | `5` | Home altitude (m) |
 | `SITL_HOME_HEADING` | `0` | Home heading (deg) |
 | `SITL_SPEEDUP` | `1` | Simulation speed multiplier |
-| `MAVPROXY_OUT` | `udpout:127.0.0.1:14550` | MAVProxy `--out` target |
+| `MAVPROXY_OUT` | `udp:127.0.0.1:14550` | MAVProxy `--out` target (bidirectional) |
 
 ## Build
 

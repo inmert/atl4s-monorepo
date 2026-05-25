@@ -15,11 +15,11 @@ One container per responsibility. ROS topics are the only inter-service interfac
 ### Current pipeline
 
 ```
-ArduPilot SITL ──TCP 5760──▶ MAVProxy ──udpout──▶ MAVROS ──ROS topics──▶ downstream
-   (atl4s-sitl)                                   (atl4s-mavros)
+ArduPilot SITL ──TCP 5760──▶ MAVProxy ◀──UDP 14550──▶ MAVROS ──ROS topics──▶ downstream
+   (atl4s-sitl)                                       (atl4s-mavros)
 ```
 
-- **SITL container** runs `arducopter` (TCP master on 5760) plus MAVProxy with `--out udpout:127.0.0.1:14550`. Same fan-out pattern is used in production — Orin Nano runs MAVProxy forwarding to the VM's external IP.
+- **SITL container** runs `arducopter` (TCP master on 5760) plus MAVProxy with `--out udp:127.0.0.1:14550` (bidirectional: MAVProxy sends from a local ephemeral port and listens for replies on it, so MAVROS commands round-trip back). Same fan-out pattern is used in production — the Orin Nano runs MAVProxy forwarding to the VM's external IP.
 - **MAVROS container** binds UDP `0.0.0.0:14550`, uses `apm.launch` (ArduPilot-specific), publishes ~50 topics under `/mavros/*` with **Best Effort** QoS.
 - Both containers use `network_mode: host` so DDS discovery and same-host UDP work without per-service port maps.
 - ROS topics over WAN (drone ↔ VM) will be bridged via Zenoh (`zenoh-bridge-ros2dds`) once Orin sensor topics are in scope. Pure MAVLink telemetry from the Orin needs no bridge.
@@ -123,7 +123,7 @@ Most MAVROS topics are published with **Best Effort** reliability. `ros2 topic e
 
 ### MAVProxy fan-out direction
 
-The current `--out udpout:127.0.0.1:14550` is **one-way** (SITL → MAVROS only). Telemetry flows but commands from MAVROS to the autopilot (arm, setpoints, mode change) will not reach ArduPilot. Switch to `--out udp:127.0.0.1:14550` (bidirectional) before building the `commander` service.
+`--out udp:127.0.0.1:14550` (bidirectional). MAVProxy binds a local ephemeral port, sends from it to MAVROS, and listens for replies on the same port. MAVROS learns that ephemeral port from the source address of the first inbound packet. Do **not** revert to `udpout:` — that is send-only and silently breaks commands from MAVROS to ArduPilot (arm, mode change, setpoints) without affecting telemetry. The runtime value can be overridden via the `MAVPROXY_OUT` env var in `.env` without rebuilding the SITL image.
 
 ### Stale entrypoint risk
 
@@ -173,12 +173,11 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
 ## Open items
 
 1. **Foxglove bridge service** — next planned. Same pattern as MAVROS (Dockerfile, entrypoint, compose entry, host networking). Add to `docker-compose.yml`, no profile.
-2. **Bidirectional MAVProxy** — change `MAVPROXY_OUT` in `services/sitl/Dockerfile` from `udpout:127.0.0.1:14550` to `udp:127.0.0.1:14550` before starting on `commander`. Blocking for commands, not blocking for telemetry display.
-3. **`commander` service** — start with a trivial behavior (e.g. "log a warning when battery < 20 %", then expand to "RTL when battery < 20 %"). Pattern: subscribe Best Effort, publish to `/mavros/setpoint_velocity/cmd_vel` or call `/mavros/cmd/arming` service.
-4. **`web-backend` + `web-frontend`** — FastAPI WebSocket service in `services/web-backend/`, plain HTML / JS or React in `services/web-frontend/`. Both behind nginx or directly exposed.
-5. **Drone integration** — when the Orin is ready, set `FCU_URL=udp://:14550@` on the VM (already the value), have the Orin run MAVProxy with `--out udpout:<VM_external_IP>:14550`, open UDP 14550 to the Orin's IP in the firewall. No downstream changes expected.
-6. **Security tightening** — replace `default-allow-ssh` with IAP-only SSH (`35.235.240.0/20`), move Foxglove / web traffic behind Tailscale or similar, add per-team-member IAM bindings. Defer until test phase is over.
-7. **GCS bucket region** — bucket is in us-east4; VM is in northamerica-northeast1. Functional but slightly slower transfers. Consider recreating in northamerica-northeast1 for production.
+2. **`commander` service** — start with a trivial behavior (e.g. "log a warning when battery < 20 %", then expand to "RTL when battery < 20 %"). Pattern: subscribe Best Effort, publish to `/mavros/setpoint_velocity/cmd_vel` or call `/mavros/cmd/arming` service.
+3. **`web-backend` + `web-frontend`** — FastAPI WebSocket service in `services/web-backend/`, plain HTML / JS or React in `services/web-frontend/`. Both behind nginx or directly exposed.
+4. **Drone integration** — when the Orin is ready, set `FCU_URL=udp://:14550@` on the VM (already the value), have the Orin run MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 to the Orin's IP in the firewall. No downstream changes expected.
+5. **Security tightening** — replace `default-allow-ssh` with IAP-only SSH (`35.235.240.0/20`), move Foxglove / web traffic behind Tailscale or similar, add per-team-member IAM bindings. Defer until test phase is over.
+6. **GCS bucket region** — bucket is in us-east4; VM is in northamerica-northeast1. Functional but slightly slower transfers. Consider recreating in northamerica-northeast1 for production.
 
 ## Owner preferences
 

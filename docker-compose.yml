@@ -27,6 +27,7 @@ services:
       SITL_HOME_LON: ${SITL_HOME_LON:--122.3790}
       SITL_HOME_ALT: ${SITL_HOME_ALT:-5}
       SITL_HOME_HEADING: ${SITL_HOME_HEADING:-0}
+      MAVPROXY_OUT: ${MAVPROXY_OUT:-udp:127.0.0.1:14550}
     profiles: ["sim"]
 
   mavros:

@@ -37,10 +37,11 @@ ENV SITL_HOME_ALT=5
 ENV SITL_HOME_HEADING=0
 ENV SITL_SPEEDUP=1
 
-# MAVProxy `--out` target. Both containers use host networking, so 127.0.0.1
-# resolves to the VM loopback. Use `udp:` (bidirectional) before any service
-# needs to send commands back to the autopilot.
-ENV MAVPROXY_OUT=udpout:127.0.0.1:14550
+# MAVProxy `--out` target. `udp:` is bidirectional — MAVProxy sends from a
+# local ephemeral port and listens for replies on it, so MAVROS commands round
+# -trip back to ArduPilot. `udpout:` would be send-only (telemetry only).
+# Both containers use host networking, so 127.0.0.1 resolves to the VM loopback.
+ENV MAVPROXY_OUT=udp:127.0.0.1:14550
 
 EXPOSE 5760/tcp 14550/udp
 

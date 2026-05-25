@@ -8,8 +8,6 @@ Consumed by `dashboard`, by `scripts/bag-record.sh`, and by any future caller ru
 
 ## Endpoints
 
-Replay lands in the next commit (see HANDOFF open item 3).
-
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/healthz` | Liveness; reports `BAG_DIR` and `GCS_BUCKET`. |
@@ -23,6 +21,9 @@ Replay lands in the next commit (see HANDOFF open item 3).
 | `GET` | `/api/bags/{name}/files/{filename}` | Stream-download one file from GCS. |
 | `POST` | `/api/bags/{name}/upload` | Multipart push to GCS; field name `files` (repeatable). |
 | `DELETE` | `/api/bags/{name}` | Delete every blob under the prefix. Irreversible. |
+| `POST` | `/api/replay/start` | Body `{bag: string}`. Downloads from GCS to `${REPLAY_DIR}/<bag>/` and spawns `ros2 bag play`. 404 if the bag has no `metadata.yaml`, 409 if already replaying. |
+| `POST` | `/api/replay/stop` | SIGTERM the playback (or cancel an in-flight download). 409 if idle. |
+| `GET` | `/api/replay/status` | `{state, bag, started_at}` with `state ∈ {idle, downloading, playing, stopping}`. |
 
 A per-recording QoS overrides file at `/tmp/qos-<name>.yaml` forces Best Effort on every topic — required for `/mavros/*`, which `ros2 bag record` otherwise misses silently. A background watcher checks `${BAG_DIR}` every `POLL_SECONDS` and uploads any bag whose newest file has been quiet for `STABLE_SECONDS`; uploaded bags are marked with a sibling `<name>.uploaded` sentinel so restarts don't re-upload.
 
@@ -37,6 +38,7 @@ A per-recording QoS overrides file at `/tmp/qos-<name>.yaml` forces Best Effort 
 | `RECORD_TOPICS` | sentinel `/mavros/*` + camera + clock | Default topic list when `POST /api/record/start` omits `topics`. |
 | `STABLE_SECONDS` | `15` | Bag is "completed" once nothing inside changes for this long. |
 | `POLL_SECONDS` | `10` | Watcher loop interval. |
+| `REPLAY_DIR` | `/tmp/replays` | Scratch dir where GCS bags are downloaded for `ros2 bag play`; cleaned up after each replay. |
 
 ## Inspecting
 

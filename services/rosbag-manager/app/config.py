@@ -14,3 +14,5 @@ DEFAULT_RECORD_TOPICS = os.environ.get(
 
 STABLE_SECONDS = int(os.environ.get('STABLE_SECONDS', '15'))
 POLL_SECONDS = int(os.environ.get('POLL_SECONDS', '10'))
+
+REPLAY_DIR = Path(os.environ.get('REPLAY_DIR', '/tmp/replays'))

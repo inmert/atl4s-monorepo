@@ -10,14 +10,11 @@ import {
 import { TopicProvider, useTopic } from './lib/topics';
 import { Home } from './pages/Home';
 import { Robots } from './pages/Robots';
+import { RobotDetail } from './pages/RobotDetail';
 import { Pipelines } from './pages/Pipelines';
 import { RosbagManager } from './pages/RosbagManager';
 import { Ros } from './pages/Ros';
 import { Health } from './pages/Health';
-// Legacy pages — still routable during the redesign so functionality isn't
-// lost while Robots / Rosbag Manager are filled out. Removed in later phases.
-import { Live } from './pages/Live';
-import { Map } from './pages/Map';
 
 const nav = [
   { to: '/', label: 'Home', icon: HomeIcon, end: true },
@@ -90,14 +87,11 @@ export function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/robots" element={<Robots />} />
-            <Route path="/robots/:id" element={<Robots />} />
+            <Route path="/robots/:id" element={<RobotDetail />} />
             <Route path="/pipelines" element={<Pipelines />} />
             <Route path="/rosbags/*" element={<RosbagManager />} />
             <Route path="/ros" element={<Ros />} />
             <Route path="/health" element={<Health />} />
-            {/* Legacy: kept routable during the redesign, hidden from nav. */}
-            <Route path="/live" element={<Live />} />
-            <Route path="/map" element={<Map />} />
           </Routes>
         </main>
       </div>

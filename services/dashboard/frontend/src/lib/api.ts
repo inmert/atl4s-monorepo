@@ -1,4 +1,22 @@
-// Typed wrappers around the proxied rosbag-manager API.
+// Typed wrappers around the dashboard backend (robot registry) and the
+// proxied rosbag-manager API.
+
+export type RobotKind = 'simulator' | 'drone' | 'rover' | string;
+export type RobotIcon = 'simulator' | 'drone' | 'rover' | 'bot' | string;
+
+export type Robot = {
+  id: string;
+  name: string;
+  kind: RobotKind;
+  icon: RobotIcon;
+  telemetry: Partial<{
+    state: string;
+    battery: string;
+    imu: string;
+    gps: string;
+    camera: string;
+  }>;
+};
 
 export type Bag = {
   name: string;
@@ -75,6 +93,10 @@ function bagPath(name: string): string {
 }
 
 export const api = {
+  // Robots
+  listRobots: () => request<Robot[]>('/api/robots'),
+  getRobot: (id: string) => request<Robot>(`/api/robots/${encodeURIComponent(id)}`),
+
   listBags: () => request<Bag[]>('/api/bags'),
   listFiles: (name: string) => request<BagFile[]>(`${bagPath(name)}/files`),
   bagMetadata: (name: string) => request<BagMetadata>(`${bagPath(name)}/metadata`),

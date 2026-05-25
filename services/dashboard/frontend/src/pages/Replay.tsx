@@ -111,7 +111,7 @@ export function Replay() {
         </div>
         <p className="hint">
           Replays publish recorded topics back onto the DDS bus with their original QoS.
-          Open <Link to="/live">Live</Link> for the in-app view, or{' '}
+          Open the relevant <Link to="/robots">robot</Link> for the in-app view, or{' '}
           <a href={foxgloveStudioUrl()} target="_blank" rel="noreferrer">Foxglove Studio ↗</a>{' '}
           for 3D inspection.
         </p>

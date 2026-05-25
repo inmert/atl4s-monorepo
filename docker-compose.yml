@@ -148,5 +148,12 @@ services:
       BAG_WEB_USER: ${BAG_WEB_USER:-}
       BAG_WEB_PASS: ${BAG_WEB_PASS:-}
       ROSBAG_MANAGER_URL: ${ROSBAG_MANAGER_URL:-http://127.0.0.1:8086}
+      ROBOTS_CONFIG: /app/config/robots.yaml
+    # YAML <<: merge does not deep-merge lists; re-declare the x-common
+    # fastdds mount alongside the robot-registry bind so edits to
+    # robots.yaml are picked up by `docker compose restart dashboard`.
+    volumes:
+      - ./shared/fastdds_profiles.xml:/fastdds_profiles.xml:ro
+      - ./services/dashboard/config:/app/config:ro
     depends_on:
       - rosbag-manager

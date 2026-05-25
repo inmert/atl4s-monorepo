@@ -113,7 +113,7 @@ export function Pipelines() {
           <button className="danger" onClick={onStop} disabled={idle}>Stop</button>
         </div>
         <p className="hint">
-          See <Link to="/live">Live</Link> for the camera viewport + raw mavros stream during replay.
+          See the relevant <Link to="/robots">robot</Link> for the camera viewport + raw telemetry stream during replay.
         </p>
       </div>
 

@@ -28,14 +28,17 @@ RUN pip3 install --no-cache-dir \
         uvicorn[standard]==0.32.0 \
         httpx==0.27.2 \
         python-multipart==0.0.12 \
-        opencv-python-headless==4.10.0.84
+        opencv-python-headless==4.10.0.84 \
+        pyyaml==6.0.2
 
 ENV DASHBOARD_BIND=0.0.0.0
 ENV DASHBOARD_PORT=8089
 ENV ROSBAG_MANAGER_URL=http://127.0.0.1:8086
+ENV ROBOTS_CONFIG=/app/config/robots.yaml
 
 WORKDIR /app
 COPY backend/ /app/backend/
+COPY config/ /app/config/
 COPY --from=frontend-build /app/frontend/dist /app/static/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

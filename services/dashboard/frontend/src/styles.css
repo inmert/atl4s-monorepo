@@ -1021,3 +1021,87 @@ table.topics pre {
     background: var(--separator);
     margin: 14px 0;
 }
+
+/* ─── Robot cards (Robots list view) ─── */
+
+.robot-card {
+    display: flex;
+    gap: 14px;
+    padding: 18px;
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    box-shadow: var(--shadow-1);
+    color: var(--label);
+    text-decoration: none;
+    transition: transform 0.12s var(--ease), background 0.12s var(--ease);
+}
+
+.robot-card:hover {
+    background: var(--surface-hover);
+    text-decoration: none;
+    color: var(--label);
+}
+
+.robot-card-icon {
+    color: var(--accent);
+    flex: none;
+    margin-top: 2px;
+}
+
+.robot-card-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.robot-card-name {
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.robot-card-kind {
+    font-size: 12px;
+    margin-top: 2px;
+    text-transform: capitalize;
+}
+
+.robot-card-summary {
+    font-size: 13px;
+    margin-top: 10px;
+    color: var(--label-2);
+    font-family: var(--font-mono);
+}
+
+/* ─── Robot detail page ─── */
+
+.robot-header {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.robot-grid {
+    display: grid;
+    grid-template-columns: minmax(320px, 1fr) 1.4fr;
+    gap: 20px;
+    align-items: start;
+}
+
+@media (max-width: 1100px) {
+    .robot-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.robot-pane-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Map nested in a card on the Robot detail page — capped shorter so it fits
+   next to the camera + telemetry without forcing scroll. */
+.robot-map {
+    height: 420px;
+    min-height: 320px;
+    box-shadow: none;
+}

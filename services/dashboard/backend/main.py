@@ -17,7 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from backend import auth, proxy
 from backend.camera import camera
 from backend.config import STATIC_DIR
-from backend.topics import bridge
+from backend.robots import camera_topics, registry, router as robots_router
+from backend.topics import bridge, topics_from_registry
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(name)s: %(message)s')
 log = logging.getLogger('dashboard.main')
@@ -26,9 +27,12 @@ log = logging.getLogger('dashboard.main')
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     loop = asyncio.get_running_loop()
+    robots = registry.load()
     rclpy.init()
     bridge.set_loop(loop)
+    bridge.set_extra_topics(topics_from_registry(robots))
     camera.set_loop(loop)
+    camera.set_topics(list(camera_topics(robots).values()))
     bridge.start()
     camera.start()
     log.info('ROS bridges started')
@@ -49,6 +53,7 @@ def healthz() -> dict:
     return {'status': 'ok'}
 
 
+app.include_router(robots_router)
 app.include_router(proxy.router)
 
 
@@ -72,24 +77,30 @@ async def ws_topics(ws: WebSocket) -> None:
         bridge.remove_subscriber(queue)
 
 
-@app.websocket('/ws/camera')
-async def ws_camera(ws: WebSocket) -> None:
+@app.websocket('/ws/camera/{robot_id}')
+async def ws_camera(ws: WebSocket, robot_id: str) -> None:
     if not auth.check_websocket(ws):
         await ws.close(code=4401)
         return
+    robot = registry.get(robot_id)
+    if robot is None or 'camera' not in robot.telemetry:
+        await ws.close(code=4404)
+        return
+    topic = robot.telemetry['camera']
     await ws.accept()
     queue: asyncio.Queue = asyncio.Queue(maxsize=4)
-    camera.add_subscriber(queue)
+    camera.add_subscriber(topic, queue)
     try:
-        if camera.latest_jpeg is not None:
-            await ws.send_bytes(camera.latest_jpeg)
+        latest = camera.latest(topic)
+        if latest is not None:
+            await ws.send_bytes(latest)
         while True:
             jpeg = await queue.get()
             await ws.send_bytes(jpeg)
     except WebSocketDisconnect:
         pass
     finally:
-        camera.remove_subscriber(queue)
+        camera.remove_subscriber(topic, queue)
 
 
 if (STATIC_DIR / 'assets').is_dir():

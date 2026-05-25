@@ -4,6 +4,13 @@ Runs an rclpy executor in a daemon thread; callbacks update an in-memory
 ``state`` snapshot and push deltas to per-client asyncio queues via
 ``run_coroutine_threadsafe``. Subscribers join with Best-Effort QoS to
 match the (Best-Effort) /mavros/* publishers.
+
+The subscribed topic set is the union of:
+- a small base set (``BASE_TOPICS``),
+- every telemetry topic referenced by every robot in the registry
+  (resolved through ``TELEMETRY_TYPES``),
+- any topic under ``/perception/*`` or ``/fusion/*`` that appears on the
+  bus after startup (dynamic discovery every 5 s).
 """
 
 import asyncio
@@ -12,7 +19,7 @@ import logging
 import threading
 import time
 from collections import deque
-from typing import Optional
+from typing import Iterable, Optional
 
 from diagnostic_msgs.msg import DiagnosticArray
 from mavros_msgs.msg import State
@@ -30,8 +37,6 @@ from sensor_msgs.msg import BatteryState, Imu, NavSatFix
 
 log = logging.getLogger('dashboard.topics')
 
-# Namespaces auto-subscribed when their topics appear on the bus. Keeps
-# perception/fusion outputs flowing to the dashboard without restarts.
 DISCOVERY_PREFIXES = ('/perception/', '/fusion/')
 DISCOVERY_PERIOD_SEC = 5.0
 
@@ -42,14 +47,35 @@ _BE_QOS = QoSProfile(
     durability=QoSDurabilityPolicy.VOLATILE,
 )
 
-# Curated set. Camera image is on a separate /ws/camera (see backend.camera).
-TOPICS = [
-    ('/mavros/state', State),
-    ('/mavros/battery', BatteryState),
-    ('/mavros/imu/data', Imu),
-    ('/mavros/global_position/global', NavSatFix),
+# Pipeline-wide topics that aren't tied to any one robot.
+BASE_TOPICS: list[tuple[str, type]] = [
     ('/atl4s/health', DiagnosticArray),
 ]
+
+# Maps a telemetry-mapping key (from robots.yaml) to the ROS message class.
+# Camera frames are handled separately by the camera bridge.
+TELEMETRY_TYPES: dict[str, type] = {
+    'state': State,
+    'battery': BatteryState,
+    'imu': Imu,
+    'gps': NavSatFix,
+}
+
+
+def topics_from_registry(robots: Iterable) -> list[tuple[str, type]]:
+    """Resolve every (topic, msg_type) referenced by the registry's telemetry
+    mappings. Unknown keys are skipped with a warning."""
+    out: list[tuple[str, type]] = []
+    for r in robots:
+        for key, topic in r.telemetry.items():
+            if key == 'camera':
+                continue  # handled by camera bridge
+            msg_type = TELEMETRY_TYPES.get(key)
+            if msg_type is None:
+                log.warning('skipping unknown telemetry key "%s" for %s', key, r.id)
+                continue
+            out.append((topic, msg_type))
+    return out
 
 
 def _to_json_safe(msg) -> dict:
@@ -63,6 +89,7 @@ class TopicBridge:
         self._timestamps: dict[str, deque] = {}
         self._subscribers: set[asyncio.Queue] = set()
         self._discovered: set[str] = set()
+        self._extra_topics: list[tuple[str, type]] = []
         self._node: Optional[Node] = None
         self._executor: Optional[SingleThreadedExecutor] = None
         self._thread: Optional[threading.Thread] = None
@@ -70,6 +97,11 @@ class TopicBridge:
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self.loop = loop
+
+    def set_extra_topics(self, topics: list[tuple[str, type]]) -> None:
+        """Topics to subscribe in addition to BASE_TOPICS. Must be set before
+        ``start()``; duplicates with BASE_TOPICS are de-duplicated by name."""
+        self._extra_topics = list(topics)
 
     def start(self) -> None:
         if self._thread is not None:
@@ -87,12 +119,16 @@ class TopicBridge:
     def _run(self) -> None:
         try:
             self._node = Node('atl4s_dashboard_topics')
-            for topic, msg_type in TOPICS:
+            subscribed: set[str] = set()
+            for topic, msg_type in BASE_TOPICS + self._extra_topics:
+                if topic in subscribed:
+                    continue
                 self._subscribe(topic, msg_type)
+                subscribed.add(topic)
             self._node.create_timer(DISCOVERY_PERIOD_SEC, self._discover)
             self._executor = SingleThreadedExecutor()
             self._executor.add_node(self._node)
-            log.info('subscribed to %d topics; discovering %s', len(TOPICS), DISCOVERY_PREFIXES)
+            log.info('subscribed to %d topics; discovering %s', len(subscribed), DISCOVERY_PREFIXES)
             while self._running:
                 self._executor.spin_once(timeout_sec=0.1)
         except Exception:

@@ -6,13 +6,12 @@ import {
   Bot,
   Cpu,
   ExternalLink,
-  Plane,
-  MonitorPlay,
 } from 'lucide-react';
 import { useTopic, useTopics } from '../lib/topics';
-import { api, type Bag } from '../lib/api';
+import { api, type Bag, type Robot } from '../lib/api';
 import { foxgloveStudioUrl } from '../lib/foxglove';
 import { formatBytes, formatDate } from '../lib/format';
+import { iconFor, isOnline, summarize } from '../lib/robots';
 import { Badge, Card, PageHeader, StatTile, StatusDot } from '../lib/components';
 
 function levelNum(level: unknown): number {
@@ -22,16 +21,23 @@ function levelNum(level: unknown): number {
 }
 
 export function Home() {
-  const state = useTopic('/mavros/state')?.data;
-  const battery = useTopic('/mavros/battery')?.data;
   const health = useTopic('/atl4s/health');
   const { topics } = useTopics();
 
+  const [robots, setRobots] = useState<Robot[] | null>(null);
   const [bags, setBags] = useState<Bag[] | null>(null);
 
   useEffect(() => {
+    api.listRobots().then(setRobots).catch(() => setRobots([]));
     api.listBags().then(setBags).catch(() => setBags([]));
   }, []);
+
+  // Aggregate telemetry across all online robots: prefer the first online one
+  // for the headline stat tiles. Keeps Home useful with just one robot but
+  // doesn't break with many.
+  const primaryRobot = (robots || []).find((r) => isOnline(r, topics));
+  const state = primaryRobot?.telemetry.state ? topics[primaryRobot.telemetry.state]?.data : undefined;
+  const battery = primaryRobot?.telemetry.battery ? topics[primaryRobot.telemetry.battery]?.data : undefined;
 
   // Health summary
   const statuses = (health?.data?.status || []) as Array<{ level: unknown; name: string }>;
@@ -43,28 +49,6 @@ export function Home() {
   const perceptionTopics = Object.values(topics).filter(
     (t) => t.topic.startsWith('/perception/') || t.topic.startsWith('/fusion/'),
   );
-
-  // Robots — Phase 1 hardcoded list. Phase 2 reads from the registry.
-  const robots = [
-    {
-      id: 'gazebo-drone',
-      name: 'Gazebo Drone',
-      kind: 'Simulator',
-      icon: MonitorPlay,
-      online: Boolean(state?.connected),
-      summary: state?.connected
-        ? `${state?.mode || '—'} · ${state?.armed ? 'ARMED' : 'disarmed'}`
-        : 'no link',
-    },
-    {
-      id: 'orin-drone',
-      name: 'Orin Drone',
-      kind: 'Drone',
-      icon: Plane,
-      online: false,
-      summary: 'not yet integrated',
-    },
-  ];
 
   const recentBags = (bags || []).slice(0, 4);
   const totalBytes = (bags || []).reduce((sum, b) => sum + b.size_bytes, 0);
@@ -88,7 +72,7 @@ export function Home() {
 
       <div className="stat-grid">
         <StatTile
-          label="Battery"
+          label={primaryRobot ? `${primaryRobot.name} · Battery` : 'Battery'}
           value={battery?.percentage != null ? `${(battery.percentage * 100).toFixed(0)}%` : '—'}
         />
         <StatTile
@@ -100,10 +84,7 @@ export function Home() {
           value={state?.mode || '—'}
           tone={state?.armed ? 'warn' : undefined}
         />
-        <StatTile
-          label="Topics seen"
-          value={Object.keys(topics).length}
-        />
+        <StatTile label="Topics seen" value={Object.keys(topics).length} />
       </div>
 
       <div className="grid grid-2" style={{ marginBottom: 20 }}>
@@ -111,33 +92,46 @@ export function Home() {
           title="Robots"
           right={<Link to="/robots" className="dim">View all →</Link>}
         >
-          <div className="stack" style={{ gap: 10 }}>
-            {robots.map((r) => (
-              <Link
-                key={r.id}
-                to={`/robots/${r.id}`}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: '10px 12px',
-                  borderRadius: 10,
-                  background: 'var(--surface-2)',
-                  color: 'var(--label)',
-                  textDecoration: 'none',
-                }}
-              >
-                <r.icon size={20} style={{ opacity: 0.85, flex: 'none' }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600 }}>{r.name}</div>
-                  <div className="dim" style={{ fontSize: 12 }}>
-                    {r.kind} · {r.summary}
-                  </div>
-                </div>
-                <StatusDot tone={r.online ? 'ok' : undefined} />
-              </Link>
-            ))}
-          </div>
+          {robots === null ? (
+            <p className="placeholder">Loading…</p>
+          ) : robots.length === 0 ? (
+            <p className="placeholder">
+              No robots configured. Edit{' '}
+              <code>services/dashboard/config/robots.yaml</code>.
+            </p>
+          ) : (
+            <div className="stack" style={{ gap: 10 }}>
+              {robots.map((r) => {
+                const Icon = iconFor(r.icon);
+                const online = isOnline(r, topics);
+                return (
+                  <Link
+                    key={r.id}
+                    to={`/robots/${r.id}`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      background: 'var(--surface-2)',
+                      color: 'var(--label)',
+                      textDecoration: 'none',
+                    }}
+                  >
+                    <Icon size={20} style={{ opacity: 0.85, flex: 'none' }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600 }}>{r.name}</div>
+                      <div className="dim" style={{ fontSize: 12, textTransform: 'capitalize' }}>
+                        {r.kind} · {summarize(r, topics)}
+                      </div>
+                    </div>
+                    <StatusDot tone={online ? 'ok' : undefined} />
+                  </Link>
+                );
+              })}
+            </div>
+          )}
         </Card>
 
         <Card
@@ -204,7 +198,13 @@ export function Home() {
               </div>
               {recentBags.map((b) => (
                 <div key={b.name} className="row space" style={{ fontSize: 13 }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span
+                    style={{
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
                     {b.name}
                   </span>
                   <span className="dim mono" style={{ fontSize: 12 }}>

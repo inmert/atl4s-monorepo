@@ -89,11 +89,19 @@ class TopicBridge:
         self._timestamps: dict[str, deque] = {}
         self._subscribers: set[asyncio.Queue] = set()
         self._discovered: set[str] = set()
+        # Per-topic queues for the ROS page's "inspect" sampler. Independent
+        # of the broadcast `_subscribers` set; only frames for the matching
+        # topic are routed here.
+        self._sample_queues: dict[str, set[asyncio.Queue]] = {}
         self._extra_topics: list[tuple[str, type]] = []
         self._node: Optional[Node] = None
         self._executor: Optional[SingleThreadedExecutor] = None
         self._thread: Optional[threading.Thread] = None
         self._running = False
+
+    @property
+    def node(self) -> Optional[Node]:
+        return self._node
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self.loop = loop
@@ -186,6 +194,9 @@ class TopicBridge:
             return
         for queue in list(self._subscribers):
             asyncio.run_coroutine_threadsafe(self._safe_put(queue, snapshot), self.loop)
+        # Per-topic sample queues (ROS page inspect drawer).
+        for queue in list(self._sample_queues.get(topic, ())):
+            asyncio.run_coroutine_threadsafe(self._safe_put(queue, snapshot), self.loop)
 
     @staticmethod
     async def _safe_put(queue: asyncio.Queue, item: dict) -> None:
@@ -203,6 +214,40 @@ class TopicBridge:
 
     def remove_subscriber(self, queue: asyncio.Queue) -> None:
         self._subscribers.discard(queue)
+
+    def add_sample(self, topic: str, queue: asyncio.Queue) -> bool:
+        """Open a per-topic sampling stream for ``queue``. If the topic isn't
+        already subscribed, looks up its type via the graph and creates a
+        Best-Effort subscription. Returns False if the topic isn't on the
+        bus or its type can't be resolved.
+
+        The created subscription is persistent (we don't tear it down when
+        the last sample client leaves) — simpler than ref-counting, and
+        memory grows only on first sample per topic, not per client.
+        """
+        if self._node is None:
+            return False
+        if topic not in self._discovered:
+            graph = dict(self._node.get_topic_names_and_types())
+            types = graph.get(topic) or []
+            if not types:
+                return False
+            try:
+                msg_class = get_message(types[0])
+            except Exception:
+                log.warning('cannot resolve type %s for %s; refusing sample', types[0], topic)
+                return False
+            self._subscribe(topic, msg_class)
+            log.info('sample-subscribed %s (%s)', topic, types[0])
+        self._sample_queues.setdefault(topic, set()).add(queue)
+        return True
+
+    def remove_sample(self, topic: str, queue: asyncio.Queue) -> None:
+        qs = self._sample_queues.get(topic)
+        if qs:
+            qs.discard(queue)
+            if not qs:
+                self._sample_queues.pop(topic, None)
 
 
 bridge = TopicBridge()

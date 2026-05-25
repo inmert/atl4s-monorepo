@@ -18,6 +18,7 @@ from backend import auth, proxy
 from backend.camera import camera
 from backend.config import STATIC_DIR
 from backend.robots import camera_topics, registry, router as robots_router
+from backend.ros import router as ros_router, sample_socket
 from backend.topics import bridge, topics_from_registry
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(name)s: %(message)s')
@@ -54,6 +55,7 @@ def healthz() -> dict:
 
 
 app.include_router(robots_router)
+app.include_router(ros_router)
 app.include_router(proxy.router)
 
 
@@ -75,6 +77,18 @@ async def ws_topics(ws: WebSocket) -> None:
         pass
     finally:
         bridge.remove_subscriber(queue)
+
+
+@app.websocket('/ws/ros/sample/{topic:path}')
+async def ws_ros_sample(ws: WebSocket, topic: str) -> None:
+    # FastAPI strips the leading slash from path parameters; restore it so
+    # the topic name matches what's on the bus.
+    if not topic.startswith('/'):
+        topic = '/' + topic
+    try:
+        await sample_socket(ws, topic)
+    except WebSocketDisconnect:
+        pass
 
 
 @app.websocket('/ws/camera/{robot_id}')

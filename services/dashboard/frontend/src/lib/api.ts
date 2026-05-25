@@ -18,6 +18,17 @@ export type Robot = {
   }>;
 };
 
+export type RosEndpoint = { node: string; qos: string };
+
+export type RosTopic = {
+  name: string;
+  types: string[];
+  pub_count: number;
+  sub_count: number;
+  pubs: RosEndpoint[];
+  subs: RosEndpoint[];
+};
+
 export type Bag = {
   name: string;
   size_bytes: number;
@@ -96,6 +107,9 @@ export const api = {
   // Robots
   listRobots: () => request<Robot[]>('/api/robots'),
   getRobot: (id: string) => request<Robot>(`/api/robots/${encodeURIComponent(id)}`),
+
+  // ROS topic graph
+  listRosTopics: () => request<RosTopic[]>('/api/ros/topics'),
 
   listBags: () => request<Bag[]>('/api/bags'),
   listFiles: (name: string) => request<BagFile[]>(`${bagPath(name)}/files`),

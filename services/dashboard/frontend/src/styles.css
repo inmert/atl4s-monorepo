@@ -1209,3 +1209,78 @@ table.topics pre {
     white-space: pre-wrap;
     word-break: break-all;
 }
+
+/* ─── Rosbag Manager (unified surface) ─── */
+
+.active-strip {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-1);
+    padding: 14px 16px;
+}
+
+.active-title {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+/* ─── Modal ─── */
+
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    z-index: 50;
+    animation: fade-in 0.12s var(--ease) both;
+}
+
+.modal {
+    background: var(--bg-elev);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-2);
+    width: 100%;
+    max-width: 520px;
+    max-height: 90vh;
+    overflow: auto;
+    animation: pop-in 0.18s var(--ease-spring) both;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--separator);
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.modal-body {
+    padding: 18px 20px 20px;
+}
+
+button.icon-only {
+    padding: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+@keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes pop-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}

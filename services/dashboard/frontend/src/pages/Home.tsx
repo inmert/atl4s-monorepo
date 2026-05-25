@@ -179,7 +179,7 @@ export function Home() {
             <p className="placeholder">Loading…</p>
           ) : bags.length === 0 ? (
             <p className="placeholder">
-              No bags in GCS. Record one from <Link to="/rosbags/record">Record</Link>.
+              No bags in GCS. Start one from <Link to="/rosbags">Rosbag Manager</Link>.
             </p>
           ) : (
             <div className="stack" style={{ gap: 8 }}>

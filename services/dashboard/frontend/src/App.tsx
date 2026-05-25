@@ -89,7 +89,11 @@ export function App() {
               <Route path="/robots" element={<Robots />} />
               <Route path="/robots/:id" element={<RobotDetail />} />
               <Route path="/pipelines" element={<Pipelines />} />
-              <Route path="/rosbags/*" element={<RosbagManager />} />
+              <Route path="/rosbags" element={<RosbagManager />} />
+              {/* phase-5 left-overs from the old /rosbags/{record,replay} routes
+                  collapse into the merged page so saved tabs still resolve. */}
+              <Route path="/rosbags/record" element={<RosbagManager />} />
+              <Route path="/rosbags/replay" element={<RosbagManager />} />
               <Route path="/ros" element={<Ros />} />
               <Route path="/health" element={<Health />} />
             </Routes>

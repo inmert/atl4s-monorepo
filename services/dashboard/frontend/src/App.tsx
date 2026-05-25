@@ -3,6 +3,7 @@ import { TopicProvider, useTopic } from './lib/topics';
 import { Home } from './pages/Home';
 import { Bags } from './pages/Bags';
 import { Live } from './pages/Live';
+import { Map } from './pages/Map';
 import { Record } from './pages/Record';
 import { Replay } from './pages/Replay';
 import { Pipelines } from './pages/Pipelines';
@@ -11,6 +12,7 @@ import { Health } from './pages/Health';
 const tabs = [
   { to: '/', label: 'Home', end: true },
   { to: '/live', label: 'Live' },
+  { to: '/map', label: 'Map' },
   { to: '/bags', label: 'Bags' },
   { to: '/record', label: 'Record' },
   { to: '/replay', label: 'Replay' },
@@ -59,6 +61,7 @@ export function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/live" element={<Live />} />
+            <Route path="/map" element={<Map />} />
             <Route path="/bags" element={<Bags />} />
             <Route path="/record" element={<Record />} />
             <Route path="/replay" element={<Replay />} />

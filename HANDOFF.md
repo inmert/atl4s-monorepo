@@ -47,11 +47,15 @@ atl4s-monorepo/
 │   ├── sitl/                 ArduPilot SITL + MAVProxy fan-out
 │   ├── mavros/               MAVLink ⇄ ROS 2 bridge
 │   ├── foxglove/             ROS 2 topics → WebSocket on TCP 8765
-│   └── commander/            Autonomy node: telemetry in, MAVROS commands out
+│   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
+│   ├── bag-record/           Records selected topics to mcap (record profile)
+│   └── uploader/             Pushes completed bags to GCS (record profile)
 ├── shared/
 │   └── fastdds_profiles.xml  shared FastDDS XML (see gotchas)
+├── data/bags/                (gitignored) local staging area for bags before upload
 ├── deploy/                   (Terraform, planned)
-└── scripts/                  dev-up.sh, prod-up.sh, topic-check.sh
+└── scripts/                  dev-up.sh, prod-up.sh, topic-check.sh,
+                              bag-record.sh, bag-list.sh
 ```
 
 ## Infrastructure
@@ -131,6 +135,14 @@ Side effect: host-side `ros2` tools need the same env var to see container topic
 
 FastRTPS today (Humble's default). Multi-host with the Orin may benefit from CycloneDDS — install `ros-humble-rmw-cyclonedds-cpp` in both images and set `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` in `x-shared-env` when the time comes.
 
+### `ros2 bag record` QoS override YAML
+
+`ros2 bag record` defaults its subscribers to Reliable. To capture `/mavros/*` (Best Effort) you must pass `--qos-profile-overrides-path` with per-topic profiles. The YAML shape Humble's parser accepts is `topic: <dict>`, **not** `topic: [<dict>]` — the more common list form crashes with `'list' object has no attribute 'items'`. `bag-record`'s entrypoint generates the correct shape dynamically from `RECORD_TOPICS`.
+
+### Compose volume merge
+
+Same trap as the env merge above: a service-level `volumes:` list silently replaces `x-common.volumes`. Any service that adds its own volume mounts must re-declare the FastDDS profile mount or lose it. `bag-record` and `uploader` both do this with a one-line comment at the call site.
+
 ## Service inventory
 
 | # | Service | Status | Notes |
@@ -139,17 +151,18 @@ FastRTPS today (Humble's default). Multi-host with the Orin may benefit from Cyc
 | 2 | `sitl` | running | ArduPilot SITL + MAVProxy. Only under `--profile sim`. |
 | 3 | `foxglove` | running | `ros-humble-foxglove-bridge` on TCP 8765. Image includes `ros-humble-mavros-msgs` so Studio can call MAVROS services. Add the `-msgs` package of every new service that exposes services. |
 | 4 | `commander` | running | Autonomy node. Low-battery latch → `set_mode RTL`. Configurable via `BATTERY_LOW_THRESHOLD`. |
-| 5 | `web-backend` | planned | FastAPI WebSocket service. Subscribes to a curated `/mavros/*` subset (Best Effort). |
-| 6 | `web-frontend` | planned | Browser dashboard against `web-backend`. |
-| 7 | `bag-record` / `bag-replay` | planned | Offline development with recorded data. |
-| 8 | `perception-detector` | planned | Object detection on the L4 GPU. |
-| 9 | `perception-segmenter` | planned | Segmentation. |
-| 10 | `perception-fault` | planned | Fault / anomaly detection. |
-| 11 | `perception-lidar` | planned | Point-cloud processing. |
-| 12 | `fusion` | planned | Combines perception + pose into tracks / events. |
-| 13 | `uploader` | planned | Recorded bags → GCS. |
-| 14 | `event-publisher` | planned | Application events → GCP Pub/Sub. |
-| 15 | `ingestion` | last | Zenoh bridge for ROS topics over WAN from the Orin. |
+| 5 | `bag-record` | running | `ros2 bag record` → mcap under `data/bags/<name>/`. Under `record` profile. Topics via `RECORD_TOPICS`. |
+| 6 | `uploader` | running | Polls `data/bags`; uploads completed bags to `gs://atl4s-rosbags`. Idempotent via `<bag>.uploaded` sentinel. Uses VM service account via GCE metadata server. |
+| 7 | `web-backend` | planned | FastAPI WebSocket service. Subscribes to a curated `/mavros/*` subset (Best Effort). |
+| 8 | `web-frontend` | planned | Browser dashboard against `web-backend`. |
+| 9 | `bag-replay` | planned | Pulls a bag from GCS and `ros2 bag play`s it onto the DDS bus. |
+| 10 | `perception-detector` | planned | Object detection on the L4 GPU. Needs camera topic (real drone or replay). |
+| 11 | `perception-segmenter` | planned | Segmentation. |
+| 12 | `perception-fault` | planned | Fault / anomaly detection. |
+| 13 | `perception-lidar` | planned | Point-cloud processing. |
+| 14 | `fusion` | planned | Combines perception + pose into tracks / events. |
+| 15 | `event-publisher` | planned | Application events → GCP Pub/Sub. |
+| 16 | `ingestion` | last | Zenoh bridge for ROS topics over WAN from the Orin. |
 
 ## Topic contracts
 
@@ -163,10 +176,12 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
 ## Open items
 
 1. **`web-backend` + `web-frontend`** — FastAPI WebSocket in `services/web-backend/`, browser dashboard in `services/web-frontend/`.
-2. **More `commander` behaviors** — only the low-battery → RTL path exists today. Natural next: takeoff command, waypoint loops, geofence triggers, event publishing to `/atl4s/events`.
-3. **Drone integration** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. No downstream changes expected.
-4. **Security tightening** — IAP-only SSH (`35.235.240.0/20`), Foxglove / web behind Tailscale, per-team IAM bindings. Defer until test phase is over.
-5. **GCS bucket region** — bucket is us-east4 but VM is northamerica-northeast1; consider recreating co-located for production.
+2. **`bag-replay` service** — pulls a bag from GCS by name and `ros2 bag play`s it onto the DDS bus. Foxglove and commander see it as live data. Pattern: one-shot `docker compose run --rm bag-replay BAG=<name>`.
+3. **First perception service** — `shared/atl4s_msgs/` for Detection types, then `services/perception-detector` (CUDA base + YOLO). Scaffolded against `image_publisher`; real validation needs Orin camera data.
+4. **More `commander` behaviors** — only the low-battery → RTL path exists today. Natural next: takeoff command, waypoint loops, geofence triggers, event publishing to `/atl4s/events`.
+5. **Drone integration** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. Orin-side `bag-record` + `uploader` push real RealSense + lidar bags to GCS. No downstream changes expected.
+6. **Security tightening** — IAP-only SSH (`35.235.240.0/20`), Foxglove / web behind Tailscale, per-team IAM bindings. Defer until test phase is over.
+7. **GCS bucket region** — bucket is us-east4 but VM is northamerica-northeast1; consider recreating co-located for production.
 
 ## Commands reference
 
@@ -175,7 +190,12 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
 ./scripts/dev-up.sh                       # SITL + downstream
 ./scripts/prod-up.sh                      # no SITL
 ./scripts/topic-check.sh                  # sanity check
-docker compose --profile sim down         # stop everything
+docker compose --profile sim --profile record down  # stop everything
+
+# Record + upload (record profile)
+./scripts/bag-record.sh 30                # record 30s, wait for upload
+./scripts/bag-list.sh                     # list bags in GCS
+docker compose --profile record up -d uploader  # uploader only (e.g. drop bags in by hand)
 
 # Logs
 docker compose logs -f
@@ -197,9 +217,9 @@ docker exec atl4s-mavros bash -c \
 diff <(docker exec atl4s-sitl cat /entrypoint.sh) services/sitl/entrypoint.sh
 
 # Force-clean rebuild (when cached layers cause stale behavior)
-docker compose --profile sim down
-docker rmi atl4s/sitl:latest atl4s/mavros:latest atl4s/foxglove:latest atl4s/commander:latest
-docker compose --profile sim build --no-cache
+docker compose --profile sim --profile record down
+docker rmi $(docker images atl4s/* -q)
+docker compose --profile sim --profile record build --no-cache
 ./scripts/dev-up.sh
 
 # VM cost control (~$17/day running, ~$0.07/day stopped)

@@ -23,10 +23,13 @@ atl4s-monorepo/
 │   ├── sitl/                 ArduPilot SITL + MAVProxy fan-out
 │   ├── mavros/               MAVLink ⇄ ROS 2 bridge
 │   ├── foxglove/             ROS 2 topics → WebSocket on TCP 8765
-│   └── commander/            Autonomy node: telemetry in, MAVROS commands out
+│   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
+│   ├── bag-record/           Records selected topics to mcap (record profile)
+│   └── uploader/             Pushes completed bags to GCS (record profile)
 ├── shared/                   FastDDS XML profile shared by all ROS containers
 ├── deploy/                   (Terraform, planned)
-└── scripts/                  dev-up.sh, prod-up.sh, topic-check.sh
+└── scripts/                  dev-up.sh, prod-up.sh, topic-check.sh,
+                              bag-record.sh, bag-list.sh
 ```
 
 ## Quick start (GCP VM, already provisioned)
@@ -49,6 +52,13 @@ docker exec atl4s-mavros bash -c \
 
 Expect `connected: true`. Browser: open Foxglove Studio (`https://studio.foxglove.dev/`) → Open connection → Foxglove WebSocket → `ws://<VM_external_IP>:8765`.
 
+Record a bag from the live pipeline (default: 30 s of the four sentinel `/mavros/*` topics; uploads to `gs://atl4s-rosbags` once done):
+
+```bash
+./scripts/bag-record.sh 30          # or: ./scripts/bag-record.sh 30 my-bag-name
+./scripts/bag-list.sh               # list bags in GCS
+```
+
 See [HANDOFF.md](HANDOFF.md) for the working context and open items.
 
 ## Services
@@ -59,9 +69,11 @@ See [HANDOFF.md](HANDOFF.md) for the working context and open items.
 | `mavros` | running | MAVLink ⇄ ROS 2 bridge. Always on. |
 | `foxglove` | running | Browser visualization via `ros-humble-foxglove-bridge`, TCP 8765. |
 | `commander` | running | Autonomy node. Low-battery latch → `set_mode RTL`. |
+| `bag-record` | running | Records selected ROS 2 topics to mcap. `record` profile. |
+| `uploader` | running | Pushes completed bags to `gs://atl4s-rosbags`. `record` profile. |
 | `web-backend` | planned | FastAPI WebSocket service for the custom dashboard. |
 | `web-frontend` | planned | Browser dashboard. |
-| `bag-record` / `bag-replay` | planned | Offline development with recorded data. |
+| `bag-replay` | planned | Replays a GCS-stored bag back onto the DDS bus. |
 | `perception-detector` | planned | Object detection on the L4 GPU. |
 | `perception-segmenter` | planned | Segmentation. |
 | `perception-fault` | planned | Fault / anomaly detection. |

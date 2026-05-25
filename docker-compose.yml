@@ -1,0 +1,31 @@
+x-common: &common
+  network_mode: host
+  environment:
+    - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
+    - RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
+  restart: unless-stopped
+
+services:
+
+  sitl:
+    <<: *common
+    build:
+      context: ./services/sitl
+    image: atl4s/sitl:latest
+    container_name: atl4s-sitl
+    environment:
+      - SITL_HOME_LAT=${SITL_HOME_LAT:-37.6213}
+      - SITL_HOME_LON=${SITL_HOME_LON:--122.3790}
+      - SITL_HOME_ALT=${SITL_HOME_ALT:-5}
+      - SITL_HOME_HEADING=${SITL_HOME_HEADING:-0}
+    profiles: ["sim"]
+
+  mavros:
+    <<: *common
+    build:
+      context: ./services/mavros
+    image: atl4s/mavros:latest
+    container_name: atl4s-mavros
+    environment:
+      - FCU_URL=${FCU_URL:-udp://@:14550}
+      - GCS_URL=${GCS_URL:-}

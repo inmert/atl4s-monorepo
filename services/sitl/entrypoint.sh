@@ -4,10 +4,13 @@ set -e
 # Forward SIGTERM/SIGINT to children so docker stop is clean.
 trap 'kill $(jobs -p) 2>/dev/null; exit 0' SIGTERM SIGINT
 
-echo "[entrypoint] Starting arducopter..."
+echo "[entrypoint] Starting arducopter (model=JSON, FDM via Gazebo on UDP :9002)..."
+# --model JSON: take physics from the external Gazebo ardupilot_gazebo plugin.
+# --defaults: copter.parm baseline + gazebo-iris.parm tuned for the Gazebo iris.
+# Speedup is omitted on purpose — Gazebo's real_time_factor controls sim time.
 /ardupilot/build/sitl/bin/arducopter \
-    --model quad \
-    --speedup "${SITL_SPEEDUP}" \
+    --model JSON \
+    --defaults /ardupilot/Tools/autotest/default_params/copter.parm,/ardupilot/Tools/autotest/default_params/gazebo-iris.parm \
     --home "${SITL_HOME_LAT},${SITL_HOME_LON},${SITL_HOME_ALT},${SITL_HOME_HEADING}" \
     --base-port 5760 \
     &

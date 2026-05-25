@@ -1,15 +1,17 @@
 # sitl
 
-ArduPilot SITL — ArduCopter simulator producing a MAVLink stream identical to the target drone.
+ArduCopter SITL configured to take its flight dynamics from the external Gazebo simulator (services/gazebo), not the internal model. MAVLink stream is identical to the target drone.
 
 ## Internals
 
 Two processes inside the container:
 
-1. `arducopter` — MAVLink master on TCP `127.0.0.1:5760`.
-2. `mavproxy.py` — connects to the TCP master and forwards over UDP.
+1. `arducopter --model JSON` — MAVLink master on TCP `127.0.0.1:5760`. Sensor data (IMU, GPS, baro) comes from Gazebo over UDP 9002 (JSON FDM). Actuator commands are sent back to Gazebo on the same channel.
+2. `mavproxy.py` — connects to the TCP master and forwards MAVLink over UDP.
 
 The entrypoint launches both, then `wait -n` exits the container if either dies so the supervisor restarts the whole unit.
+
+The container `depends_on: gazebo` so Gazebo comes up first. If `atl4s-gazebo` isn't running, ArduCopter will retry the JSON FDM connection forever and never reach `ArduPilot Ready`.
 
 ## Output
 
@@ -28,8 +30,12 @@ The entrypoint launches both, then `wait -n` exits the container if either dies 
 | `SITL_HOME_LON` | `-122.3790` | Home longitude |
 | `SITL_HOME_ALT` | `5` | Home altitude (m) |
 | `SITL_HOME_HEADING` | `0` | Home heading (deg) |
-| `SITL_SPEEDUP` | `1` | Simulation speed multiplier |
+| `SITL_SPEEDUP` | `1` | (Unused with `--model JSON`; Gazebo's `real_time_factor` controls sim time.) |
 | `MAVPROXY_OUT` | `udp:127.0.0.1:14550` | MAVProxy `--out` target |
+
+## Defaults
+
+ArduCopter is launched with `--defaults copter.parm,gazebo-iris.parm`. The `gazebo-iris.parm` file (shipped with the ArduPilot tree) configures `FRAME_CLASS`, `FRAME_TYPE`, the sonar/rangefinder for IRLock, and the parameters expected by the Gazebo iris model.
 
 ## Build
 

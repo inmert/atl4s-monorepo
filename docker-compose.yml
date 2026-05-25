@@ -32,6 +32,8 @@ services:
       SITL_HOME_HEADING: ${SITL_HOME_HEADING:-0}
       MAVPROXY_OUT: ${MAVPROXY_OUT:-udp:127.0.0.1:14550}
     profiles: ["sim"]
+    depends_on:
+      - gazebo
 
   gazebo:
     <<: *common
@@ -51,6 +53,18 @@ services:
               count: 1
               capabilities: [gpu]
     profiles: ["sim"]
+
+  gz-bridge:
+    <<: *common
+    build:
+      context: ./services/gz-bridge
+    image: atl4s/gz-bridge:latest
+    container_name: atl4s-gz-bridge
+    environment:
+      <<: *shared-env
+    profiles: ["sim"]
+    depends_on:
+      - gazebo
 
   mavros:
     <<: *common
@@ -95,7 +109,7 @@ services:
     container_name: atl4s-bag-record
     environment:
       <<: *shared-env
-      RECORD_TOPICS: ${RECORD_TOPICS:-/mavros/state /mavros/battery /mavros/global_position/global /mavros/imu/data}
+      RECORD_TOPICS: ${RECORD_TOPICS:-/mavros/state /mavros/battery /mavros/global_position/global /mavros/imu/data /camera/image /camera/camera_info /imu/gazebo /clock}
       BAG_NAME: ${BAG_NAME:-}
       BAG_DIR: /data/bags
     # YAML <<: merge does not deep-merge lists; the x-common volume must be

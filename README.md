@@ -5,10 +5,13 @@ Modular ROS 2 platform for drone telemetry and sensor processing. A Jetson Orin 
 ## Pipeline
 
 ```
-ArduPilot SITL ──TCP 5760──▶ MAVProxy ◀──UDP 14550──▶ MAVROS ──ROS topics──▶ commander, foxglove, …
+Gazebo Harmonic ◀─UDP 9002 (FDM)─▶ ArduCopter (--model JSON) ──TCP 5760──▶ MAVProxy ◀─UDP 14550─▶ MAVROS ──ROS topics──▶ commander, foxglove, …
+       │                              (atl4s-sitl)                                                  (atl4s-mavros)
+       │
+       └─ camera/IMU/clock ──▶ gz-bridge ──▶ ROS 2 topics (/camera/image, /imu/gazebo, /clock)
 ```
 
-In production, SITL is replaced by the Orin Nano forwarding MAVLink over UDP to the VM's external IP on port 14550. MAVROS configuration is identical.
+In production, Gazebo + the SITL container are replaced by the Orin Nano forwarding MAVLink (from its real ArduPilot autopilot) and the RealSense + lidar topics over UDP/Zenoh. MAVROS configuration is identical.
 
 ## Layout
 
@@ -20,13 +23,14 @@ atl4s-monorepo/
 ├── .env / .env.example
 ├── docs/                     architecture, deployment, ros-topics
 ├── services/
-│   ├── sitl/                 ArduPilot SITL + MAVProxy fan-out
+│   ├── sitl/                 ArduCopter (--model JSON) + MAVProxy fan-out
 │   ├── mavros/               MAVLink ⇄ ROS 2 bridge
 │   ├── foxglove/             ROS 2 topics → WebSocket on TCP 8765
 │   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
 │   ├── bag-record/           Records selected topics to mcap (record profile)
 │   ├── uploader/             Pushes completed bags to GCS (record profile)
-│   └── gazebo/               Gazebo Harmonic + ArduPilot SITL plugin, headless on L4 GPU
+│   ├── gazebo/               Gazebo Harmonic + ArduPilot SITL plugin, headless on L4 GPU
+│   └── gz-bridge/            Maps Gazebo topics → ROS 2 names (/camera/image, /imu/gazebo, …)
 ├── shared/                   FastDDS XML profile shared by all ROS containers
 ├── deploy/                   (Terraform, planned)
 └── scripts/                  dev-up.sh, prod-up.sh, topic-check.sh,
@@ -72,8 +76,8 @@ See [HANDOFF.md](HANDOFF.md) for the working context and open items.
 | `commander` | running | Autonomy node. Low-battery latch → `set_mode RTL`. |
 | `bag-record` | running | Records selected ROS 2 topics to mcap. `record` profile. |
 | `uploader` | running | Pushes completed bags to `gs://atl4s-rosbags`. `record` profile. |
-| `gazebo` | running (B.1) | Gazebo Harmonic + ArduPilot SITL plugin. Iris with camera/IMU/GPS in a world. SITL connection wiring is B.2. |
-| `gz-bridge` | planned (B.2) | `ros_gz_bridge` mapping Gazebo sensor topics → ROS 2 topics. |
+| `gazebo` | running | Gazebo Harmonic + ArduPilot SITL plugin. Iris with camera/IMU/GPS in `iris_runway.sdf`, headless on L4. |
+| `gz-bridge` | running | `ros_gz_bridge` mapping Gazebo sensor topics → stable ROS 2 names (`/camera/image`, `/camera/camera_info`, `/imu/gazebo`, `/clock`). |
 | `web-backend` | planned | FastAPI WebSocket service for the custom dashboard. |
 | `web-frontend` | planned | Browser dashboard. |
 | `bag-replay` | planned | Replays a GCS-stored bag back onto the DDS bus. |

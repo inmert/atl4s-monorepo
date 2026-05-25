@@ -1,0 +1,29 @@
+# ros_gz_bridge mapping. Each entry maps one Gazebo topic to one ROS 2 topic.
+# direction: GZ_TO_ROS, ROS_TO_GZ, BIDIRECTIONAL.
+#
+# Source topic names come from `gz topic -l` against the live atl4s-gazebo
+# container. ROS 2 names are stable contracts the rest of the stack relies on.
+
+- ros_topic_name: /camera/image
+  gz_topic_name: /world/iris_runway/model/iris_with_gimbal/model/gimbal/link/pitch_link/sensor/camera/image
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: gz.msgs.Image
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /camera/camera_info
+  gz_topic_name: /world/iris_runway/model/iris_with_gimbal/model/gimbal/link/pitch_link/sensor/camera/camera_info
+  ros_type_name: sensor_msgs/msg/CameraInfo
+  gz_type_name: gz.msgs.CameraInfo
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /imu/gazebo
+  gz_topic_name: /world/iris_runway/model/iris_with_gimbal/model/iris_with_standoffs/link/imu_link/sensor/imu_sensor/imu
+  ros_type_name: sensor_msgs/msg/Imu
+  gz_type_name: gz.msgs.IMU
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /clock
+  gz_topic_name: /world/iris_runway/clock
+  ros_type_name: rosgraph_msgs/msg/Clock
+  gz_type_name: gz.msgs.Clock
+  direction: GZ_TO_ROS

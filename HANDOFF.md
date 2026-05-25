@@ -15,14 +15,20 @@ One container per responsibility. ROS topics are the only inter-service interfac
 ### Current pipeline
 
 ```
-ArduPilot SITL ──TCP 5760──▶ MAVProxy ◀──UDP 14550──▶ MAVROS ──ROS topics──▶ commander, foxglove, …
-   (atl4s-sitl)                                       (atl4s-mavros)
+Gazebo Harmonic ◀─UDP 9002 (FDM)─▶ ArduCopter ──TCP 5760──▶ MAVProxy ◀─UDP 14550─▶ MAVROS ──ROS topics──▶ commander, foxglove, …
+  (atl4s-gazebo)                  (--model JSON,                                  (atl4s-mavros)
+                                   atl4s-sitl)
+       │
+       └─ camera/imu/clock ─▶ gz-bridge ─▶ /camera/image, /imu/gazebo, /clock
+                              (atl4s-gz-bridge)
 ```
 
-- **SITL** runs `arducopter` (TCP master 5760) plus MAVProxy with `--out udp:127.0.0.1:14550` (bidirectional). Same fan-out pattern is used in production — the Orin runs MAVProxy forwarding to the VM's external IP.
-- **MAVROS** binds UDP `0.0.0.0:14550`, uses `apm.launch` (ArduPilot-specific), publishes ~140 topics under `/mavros/*` with **Best Effort** QoS.
+- **Gazebo** runs `iris_runway.sdf` headless on the L4 GPU with the `ardupilot_gazebo` plugin loaded. Plugin listens on UDP 127.0.0.1:9002 for the JSON FDM stream.
+- **SITL** runs `arducopter --model JSON --defaults copter.parm,gazebo-iris.parm`. Sensors (IMU, GPS, baro) come from Gazebo over JSON FDM. MAVLink still exposed on TCP 5760, fan-out to MAVROS unchanged via MAVProxy `--out udp:127.0.0.1:14550` (bidirectional).
+- **gz-bridge** runs `ros_gz_bridge parameter_bridge` with a YAML config that renames the long Gazebo topic paths to short stable ROS 2 names. One-way (GZ_TO_ROS); MAVROS handles all commands into the vehicle.
+- **MAVROS** binds UDP `0.0.0.0:14550`, uses `apm.launch`, publishes ~140 topics under `/mavros/*` with **Best Effort** QoS.
 - All containers use `network_mode: host` so DDS discovery and same-host UDP work without per-service port maps.
-- ROS topics over WAN (drone ↔ VM) will be bridged via Zenoh (`zenoh-bridge-ros2dds`) once Orin sensor topics are in scope. Pure MAVLink from the Orin needs no bridge.
+- ROS topics over WAN (drone ↔ VM) will be bridged via Zenoh (`zenoh-bridge-ros2dds`) once Orin sensor topics are in scope.
 
 ### Key decisions
 
@@ -50,7 +56,8 @@ atl4s-monorepo/
 │   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
 │   ├── bag-record/           Records selected topics to mcap (record profile)
 │   ├── uploader/             Pushes completed bags to GCS (record profile)
-│   └── gazebo/               Gazebo Harmonic + ArduPilot SITL plugin (headless, GPU)
+│   ├── gazebo/               Gazebo Harmonic + ArduPilot SITL plugin (headless, GPU)
+│   └── gz-bridge/            Gazebo topics → ROS 2 names (camera, IMU, clock)
 ├── shared/
 │   └── fastdds_profiles.xml  shared FastDDS XML (see gotchas)
 ├── data/bags/                (gitignored) local staging area for bags before upload
@@ -84,12 +91,15 @@ atl4s-monorepo/
 
 ## Current status
 
-**Telemetry pipeline + Foxglove + commander all working.**
+**Full pipeline working with Gazebo as the simulator.**
 
-- SITL: stable, GPS lock, EKF converged.
-- MAVROS: bound on `0.0.0.0:14550`, link established. `AUTOPILOT_VERSION` round-trip succeeds (proves the bidirectional path).
-- Foxglove: listening on `0.0.0.0:8765`, advertising ~140 channels.
-- Commander: subscribed to `/mavros/state` and `/mavros/battery`. Verified end-to-end by forcing a trip with `BATTERY_LOW_THRESHOLD=1.0` — commander called `set_mode RTL`, MAVROS accepted, `/mavros/state.mode` reflected `RTL`.
+- Gazebo Harmonic 8.11 rendering on L4 GPU, iris_with_gimbal model in `iris_runway.sdf`.
+- SITL: `arducopter --model JSON` connected to Gazebo's FDM bridge on UDP 9002. 1413 params synced, EKF3 IMU0/1 initialised and tilt-aligned, `ArduPilot Ready`.
+- MAVROS: bound on `0.0.0.0:14550`, link established. `AUTOPILOT_VERSION` round-trip succeeds.
+- gz-bridge: `/camera/image` (640×480), `/camera/camera_info`, `/imu/gazebo` (~600 Hz), `/clock` all flowing as ROS 2 topics.
+- Foxglove: listening on `0.0.0.0:8765`, can subscribe to both Gazebo and MAVROS topics.
+- Commander: low-battery → `set_mode RTL` verified end-to-end (forced via `BATTERY_LOW_THRESHOLD=1.0`).
+- bag-record + uploader: verified end-to-end via `./scripts/bag-record.sh 10 atl4s-gazebo-test` — 40.8 MiB mcap with 10080 messages including 44 camera frames, uploaded to `gs://atl4s-rosbags/atl4s-gazebo-test/`.
 
 Verify:
 
@@ -136,6 +146,10 @@ Side effect: host-side `ros2` tools need the same env var to see container topic
 
 FastRTPS today (Humble's default). Multi-host with the Orin may benefit from CycloneDDS — install `ros-humble-rmw-cyclonedds-cpp` in both images and set `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` in `x-shared-env` when the time comes.
 
+### Gazebo battery → ArduCopter failsafe on first boot
+
+ArduCopter logs `Flight battery warning` and triggers `RTL` briefly on every SITL startup. The Gazebo battery sim reports a momentarily low value during sensor initialisation; ArduCopter's internal battery failsafe (separate from our `commander`) fires before the value settles to 12.6 V. This is not a `commander` action and is harmless — mode flips back to STABILIZE once the battery reads normally. If it becomes a problem (e.g. it fires during a real autonomous mission), the fix is parameter-level (`BATT_LOW_VOLT`, `BATT_FS_LOW_ACT`) in `gazebo-iris.parm`.
+
 ### Gazebo cosmetic warnings
 
 Two harmless messages on every `atl4s-gazebo` start:
@@ -161,8 +175,8 @@ Same trap as the env merge above: a service-level `volumes:` list silently repla
 | 4 | `commander` | running | Autonomy node. Low-battery latch → `set_mode RTL`. Configurable via `BATTERY_LOW_THRESHOLD`. |
 | 5 | `bag-record` | running | `ros2 bag record` → mcap under `data/bags/<name>/`. Under `record` profile. Topics via `RECORD_TOPICS`. |
 | 6 | `uploader` | running | Polls `data/bags`; uploads completed bags to `gs://atl4s-rosbags`. Idempotent via `<bag>.uploaded` sentinel. Uses VM service account via GCE metadata server. |
-| 7 | `gazebo` | running (B.1) | Gazebo Harmonic 8.11 + `ardupilot_gazebo` plugin. Iris quad with gimbal, camera, IMU, GPS in `iris_runway.sdf`. Headless rendering on the L4. ArduPilot SITL plugin listens on UDP 127.0.0.1:9002. |
-| 8 | `gz-bridge` | planned (B.2) | `ros_gz_bridge` mapping `/world/iris_runway/.../image`, `imu`, `navsat` → ROS 2 topics under stable names. Adds camera + lidar to `services/sitl` rewrite. |
+| 7 | `gazebo` | running | Gazebo Harmonic 8.11 + `ardupilot_gazebo` plugin. Iris quad with gimbal, camera, IMU, GPS in `iris_runway.sdf`. Headless rendering on the L4. SITL plugin on UDP 127.0.0.1:9002. |
+| 8 | `gz-bridge` | running | `ros_gz_bridge` mapping `/world/iris_runway/.../image`, `imu`, `clock` → `/camera/image`, `/imu/gazebo`, `/clock`. One-way (GZ_TO_ROS). Add new mappings in `services/gz-bridge/bridge.yaml`. |
 | 9 | `web-backend` | planned | FastAPI WebSocket service. Subscribes to a curated `/mavros/*` subset (Best Effort). |
 | 10 | `web-frontend` | planned | Browser dashboard against `web-backend`. |
 | 11 | `bag-replay` | planned | Pulls a bag from GCS and `ros2 bag play`s it onto the DDS bus. |
@@ -186,10 +200,10 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
 ## Open items
 
 1. **`web-backend` + `web-frontend`** — FastAPI WebSocket in `services/web-backend/`, browser dashboard in `services/web-frontend/`.
-2. **B.2 — wire Gazebo into the pipeline.** Three pieces: (a) rewrite `services/sitl` so ArduCopter connects to Gazebo's plugin on UDP :9002 instead of running the internal SIM model; (b) add `services/gz-bridge` (`ros_gz_bridge` mapping `/world/iris_runway/.../camera/image` → `/camera/image`, `imu` → `/camera/imu`, `navsat` → `/gps/fix`, plus a 3D lidar once added to `atl4s.sdf`); (c) update `bag-record` defaults to include the new sensor topics; verify a real perception-ready bag in Foxglove.
+2. **B.3 — lidar + richer scene.** Add a 3D lidar sensor block to `services/gazebo/world/atl4s.sdf` (Velodyne-style ray sensor with ~16 beams). Switch `GZ_WORLD` default to `atl4s.sdf` so the iris flies in the obstacle course instead of the bare runway. Add the lidar topic to `bridge.yaml` as `/lidar/points` (sensor_msgs/PointCloud2). Update `bag-record` defaults.
 3. **`bag-replay` service** — pulls a bag from GCS by name and `ros2 bag play`s it onto the DDS bus. Foxglove and commander see it as live data. Pattern: one-shot `docker compose run --rm bag-replay BAG=<name>`.
-4. **First perception service** — `shared/atl4s_msgs/` for Detection types, then `services/perception-detector` (CUDA base + YOLO). After B.2 you can validate it against live Gazebo camera frames, not just `image_publisher`.
-5. **More `commander` behaviors** — only the low-battery → RTL path exists today. Natural next: takeoff command, waypoint loops, geofence triggers, event publishing to `/atl4s/events`.
+4. **First perception service** — `shared/atl4s_msgs/` for Detection types, then `services/perception-detector` (CUDA base + YOLO). Camera is now live so validation works against `/camera/image` directly.
+5. **More `commander` behaviors** — takeoff command, waypoint loops, geofence triggers, event publishing to `/atl4s/events`.
 6. **Drone integration** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. Orin-side `bag-record` + `uploader` push real RealSense + lidar bags to GCS. No downstream changes expected.
 7. **Security tightening** — IAP-only SSH (`35.235.240.0/20`), Foxglove / web behind Tailscale, per-team IAM bindings. Defer until test phase is over.
 8. **GCS bucket region** — bucket is us-east4 but VM is northamerica-northeast1; consider recreating co-located for production.

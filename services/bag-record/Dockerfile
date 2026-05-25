@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-humble-mavros-msgs \
     && rm -rf /var/lib/apt/lists/*
 
-ENV RECORD_TOPICS="/mavros/state /mavros/battery /mavros/global_position/global /mavros/imu/data"
+ENV RECORD_TOPICS="/mavros/state /mavros/battery /mavros/global_position/global /mavros/imu/data /camera/image /camera/camera_info /imu/gazebo /clock"
 ENV BAG_DIR=/data/bags
 
 COPY entrypoint.sh /entrypoint.sh

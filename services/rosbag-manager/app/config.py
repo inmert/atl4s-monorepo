@@ -11,3 +11,6 @@ DEFAULT_RECORD_TOPICS = os.environ.get(
     '/mavros/state /mavros/battery /mavros/global_position/global '
     '/mavros/imu/data /camera/image /camera/camera_info /imu/gazebo /clock',
 ).split()
+
+STABLE_SECONDS = int(os.environ.get('STABLE_SECONDS', '15'))
+POLL_SECONDS = int(os.environ.get('POLL_SECONDS', '10'))

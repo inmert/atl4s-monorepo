@@ -169,3 +169,12 @@ async def stop() -> dict:
 @router.get('/status')
 def status() -> dict:
     return recorder.status()
+
+
+async def on_shutdown() -> None:
+    if recorder.state == 'recording':
+        log.info('shutdown: stopping active recording')
+        try:
+            await recorder.stop()
+        except HTTPException:
+            pass

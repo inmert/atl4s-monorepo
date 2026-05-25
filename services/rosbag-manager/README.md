@@ -8,7 +8,7 @@ Consumed by `dashboard`, by `scripts/bag-record.sh`, and by any future caller ru
 
 ## Endpoints
 
-Upload, GCS browser, and replay land in subsequent commits (see HANDOFF open item 3).
+GCS browser and replay land in subsequent commits (see HANDOFF open item 3).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -16,8 +16,10 @@ Upload, GCS browser, and replay land in subsequent commits (see HANDOFF open ite
 | `POST` | `/api/record/start` | Body `{name?, topics?, duration?}`. Spawns `ros2 bag record` to `${BAG_DIR}/<name>/`. 409 if already recording. `duration` (seconds) auto-stops in the background. |
 | `POST` | `/api/record/stop` | SIGTERM the current recording; closes the bag cleanly. 409 if idle. |
 | `GET` | `/api/record/status` | `{state, name, topics, output, started_at}` with `state ∈ {idle, recording, stopping}`. |
+| `GET` | `/api/uploads` | Per-bag status of every directory in `${BAG_DIR}`: `{name, size_bytes, files, mtime, uploaded, in_flight}`. |
+| `POST` | `/api/uploads/{name}` | Force-upload a bag now without waiting for the stable window. 409 if already uploading or uploaded. |
 
-A per-recording QoS overrides file at `/tmp/qos-<name>.yaml` forces Best Effort on every topic — required for `/mavros/*`, which `ros2 bag record` otherwise misses silently.
+A per-recording QoS overrides file at `/tmp/qos-<name>.yaml` forces Best Effort on every topic — required for `/mavros/*`, which `ros2 bag record` otherwise misses silently. A background watcher checks `${BAG_DIR}` every `POLL_SECONDS` and uploads any bag whose newest file has been quiet for `STABLE_SECONDS`; uploaded bags are marked with a sibling `<name>.uploaded` sentinel so restarts don't re-upload.
 
 ## Configuration
 
@@ -27,6 +29,9 @@ A per-recording QoS overrides file at `/tmp/qos-<name>.yaml` forces Best Effort 
 | `GCS_BUCKET` | `atl4s-rosbags` | Target bucket. |
 | `ROSBAG_MANAGER_BIND` | `127.0.0.1` | Bind address. Loopback by default. |
 | `ROSBAG_MANAGER_PORT` | `8086` | Bind port. |
+| `RECORD_TOPICS` | sentinel `/mavros/*` + camera + clock | Default topic list when `POST /api/record/start` omits `topics`. |
+| `STABLE_SECONDS` | `15` | Bag is "completed" once nothing inside changes for this long. |
+| `POLL_SECONDS` | `10` | Watcher loop interval. |
 
 ## Inspecting
 

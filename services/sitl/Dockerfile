@@ -15,7 +15,7 @@ RUN git clone --depth 1 --recurse-submodules --shallow-submodules \
 
 WORKDIR /ardupilot
 
-RUN pip3 install --no-cache-dir pymavlink MAVProxy future empy==3.3.4
+RUN pip3 install --no-cache-dir pymavlink MAVProxy pexpect future empy==3.3.4
 
 RUN modules/waf/waf-light configure --board sitl \
     && modules/waf/waf-light copter

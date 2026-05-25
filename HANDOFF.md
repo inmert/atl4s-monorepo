@@ -103,7 +103,7 @@ atl4s-monorepo/
 - Commander: low-battery → `set_mode RTL` verified end-to-end (forced via `BATTERY_LOW_THRESHOLD=1.0`).
 - Healthcheck: tracks 7 topics, reports stdout summary every 5 s, HTTP `GET /health` on `:8088` (200/503), publishes `/atl4s/health` (DiagnosticArray) for Foxglove.
 - rosbag-manager: HTTP API on `127.0.0.1:8086` for record / upload / GCS browser / replay. Smoke tested end-to-end via `./scripts/bag-record.sh` — record subprocess + watcher upload + GCS confirmed; replay downloads from GCS, plays, and cleans up `${REPLAY_DIR}`.
-- dashboard: operator UI on `:8089` with HTTP Basic via `BAG_WEB_USER` / `BAG_WEB_PASS`. Bags page proxies the rosbag-manager GCS browser; live view / camera / health / map / pipelines pages land incrementally.
+- dashboard: operator UI on `:8089` with HTTP Basic via `BAG_WEB_USER` / `BAG_WEB_PASS`. Pages: Home, Live (telemetry + camera + raw-data viewer), Map (Leaflet GPS plot), Bags (browser + metadata + multipart upload + delete), Record, Replay, Pipelines (auto-discovers `/perception/*` and `/fusion/*` every 5 s), Health (DiagnosticArray + nav badge). All `/api/*` calls stream-proxy to `rosbag-manager`; `/ws/topics` and `/ws/camera` bridge rclpy subscribers from a daemon thread. Foxglove Studio deep link on Live and Replay.
 
 Verify:
 
@@ -187,6 +187,18 @@ Two harmless messages on every `atl4s-gazebo` start:
 
 Same trap as the env merge above: a service-level `volumes:` list silently replaces `x-common.volumes`. Any service that adds its own volume mounts must re-declare the FastDDS profile mount or lose it. `rosbag-manager` does this with a one-line comment at the call site.
 
+### ROS `byte` field → 1-char string in JSON
+
+`rosidl_runtime_py.message_to_ordereddict()` represents ROS `byte` fields as 1-character `str`, not `int`. `diagnostic_msgs/DiagnosticStatus.level` is the obvious one (`b'\x00'` becomes `" "` in the JSON the dashboard ships to the browser). The dashboard frontend coerces via `String.charCodeAt(0)` in `pages/Health.tsx` and `App.tsx`. Other byte fields to watch for if they ever surface: `sensor_msgs/BatteryState.power_supply_status`, `sensor_msgs/Imu` orientation_covariance (no, that's float).
+
+### HTTP Basic auth across WebSocket upgrades
+
+The dashboard reuses `BAG_WEB_USER` / `BAG_WEB_PASS` as the realm for both `/api/*` (HTTP) and `/ws/*` (WebSocket). Browsers cache Basic credentials per origin and resend them on the WebSocket upgrade request — `backend/auth.py:check_websocket()` reads the cached `Authorization: Basic ...` header. The cache only populates after the user has authenticated for a normal HTTP request first, so open the SPA root before any direct `/ws/*` test from a browser.
+
+### Dashboard dynamic topic discovery
+
+The topic bridge (`services/dashboard/backend/topics.py`) calls `node.get_topic_names_and_types()` every 5 s and dynamically subscribes to any new topic under `/perception/*` or `/fusion/*` whose type can be resolved via `rosidl_runtime_py.utilities.get_message()`. Topics whose type can't be imported (e.g. a future `atl4s_msgs/...` before the package is installed in the dashboard image) are added to `_discovered` anyway to avoid a hot-loop retry. Once you add a new perception service, rebuild the dashboard image to pick up its message package — the topic will appear automatically on the next 5 s tick.
+
 ## Service inventory
 
 | # | Service | Status | Profile | Notes |
@@ -199,7 +211,7 @@ Same trap as the env merge above: a service-level `volumes:` list silently repla
 | 6 | `commander` | running | always | Autonomy. Low-battery latch → `/mavros/set_mode RTL`. Threshold via `BATTERY_LOW_THRESHOLD`. |
 | 7 | `healthcheck` | running | always | Topic-liveness monitor. Stdout summary + HTTP `/health` on 8088 + `/atl4s/health` (DiagnosticArray). |
 | 8 | `rosbag-manager` | running | always | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser (list / upload / download / delete), and replay via `ros2 bag play`. Binds `127.0.0.1:8086` (loopback only). `FROM ros:humble`. Consumed by `dashboard`, `scripts/bag-record.sh`, and any future caller on the host. |
-| 9 | `dashboard` | running | always | Single human-facing surface on TCP 8089 with HTTP Basic (`BAG_WEB_USER` / `BAG_WEB_PASS`). Streaming proxy to `rosbag-manager` under `/api/*`; React + Vite + TS frontend; FastAPI + rclpy backend in one image. Bags page is live; live view / camera / record / replay / health / map / pipelines pages land incrementally (see open item 3). |
+| 9 | `dashboard` | running | always | Single human-facing surface on TCP 8089 with HTTP Basic (`BAG_WEB_USER` / `BAG_WEB_PASS`). Streaming proxy to `rosbag-manager` under `/api/*`; `/ws/topics` + `/ws/camera` rclpy bridges in a daemon thread. Pages: Home, Live, Map (Leaflet), Bags (with metadata.yaml preview), Record, Replay, Pipelines (auto-discovers `/perception/*` and `/fusion/*`), Health. Foxglove deep link from Live + Replay. React + Vite + TS frontend; FastAPI + rclpy backend in one image. |
 | 10 | `perception-detector` | planned | — | YOLO on `/camera/image`, L4 GPU. First use of `shared/atl4s_msgs/`. |
 | 11 | `perception-segmenter` | planned | — | Segmentation. |
 | 12 | `perception-fault` | planned | — | Fault / anomaly detection. |
@@ -221,20 +233,10 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
 
 1. **More `commander` behaviors** — takeoff command, waypoint loop, geofence triggers, event publishing to `/atl4s/events`. Pure ROS 2 work, no new infrastructure.
 2. **First perception service (`perception-detector`)** — stand up `shared/atl4s_msgs/` for Detection types, then `services/perception-detector` (CUDA base + YOLO on `/camera/image`). First use of the L4 GPU for inference.
-3. **Build `dashboard` service** — single human-facing surface; UI + live topic bridge + proxy to `rosbag-manager`. One container: multi-stage Dockerfile (Node build → `ros:humble` runtime), FastAPI + rclpy backend, React + Vite + TS frontend. Reuses bag-web's port 8089 and `BAG_WEB_USER` / `BAG_WEB_PASS` once bag-web is retired. Owns no bag state — proxies all bag operations to `rosbag-manager`. Owns no compute — perception services do inference; the dashboard renders, browses, and triggers. 3D visualisation is deferred to Foxglove Studio via a deep link; the in-app view is raw data, 2D map, camera. Staged build, one commit each:
-   1. Scaffold `services/dashboard/` — multi-stage Dockerfile, FastAPI `/healthz`, React + Vite + TS skeleton with placeholder pages (Home, Bags, Live, Record, Replay, Pipelines, Health), nav layout, compose entry on TCP 8090 (transitional; moves to 8089 in step 3).
-   2. Backend proxy layer — forward `/api/{bags,record,replay,uploads}/*` to `http://127.0.0.1:8086`. HTTP Basic enforced at the dashboard edge using `BAG_WEB_USER` / `BAG_WEB_PASS`.
-   3. Bags page hitting the proxied endpoints → reach `bag-web` UI parity → delete `services/bag-web/`, move dashboard to TCP 8089.
-   4. Live topic bridge + Live page — rclpy subscribers + `/ws/topics` for the curated set (`/mavros/state`, `/mavros/battery`, `/mavros/imu/data`, `/mavros/global_position/*`, `/atl4s/health`, `/perception/*`); telemetry strip + raw-data viewer (per-topic latest message + rates) + `/ws/camera` JPEG viewport.
-   5. Record + Replay pages calling the proxied endpoints; replay page reuses the Live page's topic bridge to show data flowing during playback.
-   6. Health panel + nav badge — dedicated page rendering `/atl4s/health` (DiagnosticArray) plus an aggregate OK/WARN/ERROR badge in the nav.
-   7. Map view — 2D GPS plot from `/mavros/global_position/global` (Leaflet or canvas); works on live or replayed data.
-   8. Pipelines page — pick a bag → start replay → watch `/perception/*` topics as perception services consume the replayed data; detection overlay on the camera viewport; aggregate summary. Gated on `perception-detector` existing (open item 2).
-   9. Bag inspection — clicking a bag in the browser parses its `metadata.yaml` (topics, message counts, duration) and shows a preview; "Open in Foxglove Studio" deep link for full 3D inspection of a running replay.
-4. **Drone integration (Orin Nano)** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. Orin-side recording + upload calls `rosbag-manager`'s API to push real RealSense + lidar bags to GCS. Zenoh bridge for ROS topics over WAN comes at the end (`ingestion` service).
-5. **B.3 — lidar in Gazebo (parked).** Attempted: gpu_lidar block in `services/gazebo/world/models/atl4s_lidar/` + composite `iris_with_lidar` model + `atl4s.sdf` world. Even at 90×4 rays @ 1 Hz the render back-pressures the JSON-FDM loop — SITL logs continuous `No JSON sensor message received, resending servos`. Retry path: lighter ray budget (e.g. 16×1), async sensor rendering, or skip Gazebo lidar entirely and validate `perception-lidar` against real Orin/RealSense data later. Files were rolled back; not in the repo today.
-6. **Security tightening** — IAP-only SSH (`35.235.240.0/20`), Foxglove / web behind Tailscale, per-team IAM bindings. Defer until test phase is over.
-7. **GCS bucket region** — bucket is us-east4 but VM is northamerica-northeast1; consider recreating co-located for production traffic.
+3. **Drone integration (Orin Nano)** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. Orin-side recording + upload calls `rosbag-manager`'s API to push real RealSense + lidar bags to GCS. Zenoh bridge for ROS topics over WAN comes at the end (`ingestion` service).
+4. **B.3 — lidar in Gazebo (parked).** Attempted: gpu_lidar block in `services/gazebo/world/models/atl4s_lidar/` + composite `iris_with_lidar` model + `atl4s.sdf` world. Even at 90×4 rays @ 1 Hz the render back-pressures the JSON-FDM loop — SITL logs continuous `No JSON sensor message received, resending servos`. Retry path: lighter ray budget (e.g. 16×1), async sensor rendering, or skip Gazebo lidar entirely and validate `perception-lidar` against real Orin/RealSense data later. Files were rolled back; not in the repo today.
+5. **Security tightening** — IAP-only SSH (`35.235.240.0/20`), Foxglove / web behind Tailscale, per-team IAM bindings. Defer until test phase is over.
+6. **GCS bucket region** — bucket is us-east4 but VM is northamerica-northeast1; consider recreating co-located for production traffic.
 
 ## Commands reference
 

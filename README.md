@@ -79,7 +79,7 @@ See [HANDOFF.md](HANDOFF.md) for the working context and open items.
 | `commander` | always | Autonomy node. Low-battery latch → `set_mode RTL`. |
 | `healthcheck` | always | Topic-liveness monitor. stdout, HTTP `:8088/health`, `/atl4s/health`. |
 | `rosbag-manager` | always | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser, replay via `ros2 bag play`. Loopback on `127.0.0.1:8086`. Consumed by `dashboard`, `scripts/bag-record.sh`, and any future host caller. |
-| `dashboard` | always | Single human-facing surface on TCP 8089 with HTTP Basic. Streaming proxy to `rosbag-manager` for all bag-plane API calls. Live topic view, raw data viewer, camera, map, health, pipelines pages land incrementally — see HANDOFF item 3. React + Vite + TS frontend, FastAPI + rclpy backend in one image. |
+| `dashboard` | always | Single human-facing surface on TCP 8089 with HTTP Basic. Streaming `/api/*` proxy to `rosbag-manager`; `/ws/topics` + `/ws/camera` rclpy bridges. Pages: Live (telemetry + raw-data + camera), Map (Leaflet GPS plot), Bags (with metadata.yaml preview), Record, Replay, Pipelines (auto-discovers `/perception/*` + `/fusion/*`), Health. Foxglove deep link from Live + Replay. React + Vite + TS frontend, FastAPI + rclpy backend in one image. |
 | `perception-detector` | planned | Object detection on the L4 GPU (first GPU service, first user of `shared/atl4s_msgs/`). |
 | `perception-segmenter` | planned | Segmentation. |
 | `perception-fault` | planned | Fault / anomaly detection. |

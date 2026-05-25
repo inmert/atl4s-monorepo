@@ -31,7 +31,7 @@ All containers use `network_mode: host`. DDS discovery and same-host UDP work wi
 
 Two services own the human-facing and storage planes; the boundary between them is the bag plane:
 
-- **`dashboard`** — single human-facing surface on TCP 8089 (HTTP Basic). Renders live ROS topics via rclpy + WebSocket, and proxies every bag-plane action to `rosbag-manager`. Owns no state, runs no models.
-- **`rosbag-manager`** — HTTP API for every bag-plane action: record start/stop/status, watcher + GCS upload, GCS browser (list / upload / download / delete), and replay via `ros2 bag play`. Binds `127.0.0.1:8086` (loopback only; reachable from the dashboard, from `scripts/*`, and from any future service on the host).
+- **`dashboard`** — single human-facing surface on TCP 8089 (HTTP Basic). React + Vite + TS frontend + FastAPI/rclpy backend in one container. Streams live ROS topics over `/ws/topics` (curated mavros + atl4s set, with dynamic discovery of `/perception/*` and `/fusion/*`) and JPEG frames over `/ws/camera`. Proxies every bag-plane action to `rosbag-manager` under `/api/*`. Owns no state, runs no models. 3D visualisation is delegated to a Foxglove Studio deep link.
+- **`rosbag-manager`** — HTTP API for every bag-plane action: record start/stop/status, watcher + GCS upload, GCS browser (list / files / metadata / download / multipart upload / delete), and replay via `ros2 bag play`. Binds `127.0.0.1:8086` (loopback only; reachable from the dashboard, from `scripts/*`, and from any future service on the host).
 
 This consolidates what would otherwise be six separate services (live backend, browser frontend, bag browser, bag record, bag uploader, bag replay) into two with a clean line: humans hit `dashboard`, bag operations go through `rosbag-manager`. Foxglove Studio stays available for ad-hoc development.

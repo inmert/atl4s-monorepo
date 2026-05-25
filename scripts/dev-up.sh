@@ -1,5 +1,7 @@
 #!/bin/bash
-set -e
+set -euo pipefail
+
 cd "$(dirname "$0")/.."
+
 docker compose --profile sim up -d
 docker compose ps

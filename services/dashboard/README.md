@@ -10,9 +10,9 @@ Phased Apple-style redesign in progress. Phase 1 (sidebar shell + new IA + desig
 
 | Path | What it shows |
 |---|---|
-| `/` | Overview: stat tiles (battery, mode, topics seen), per-card summaries of Robots, Health, Pipelines, Rosbags, plus quick-link tiles to each tab. Foxglove deep link. |
-| `/robots` | Device registry (Gazebo Drone + Orin Drone today). Phase 1: list view + per-robot stub that links back to legacy `/live` and `/map`. Phase 2: per-robot Telemetry / Map / Camera scoped to the selected robot, registry config in `services/dashboard/config/robots.yaml`. |
-| `/robots/:id` | Selected robot's detail pane (placeholder in phase 1). |
+| `/` | Overview: stat tiles (battery, mode, topics seen — primary robot), per-card summaries of Robots, Health, Pipelines, Rosbags, plus quick-link tiles to each tab. Foxglove deep link. |
+| `/robots` | Device registry from `config/robots.yaml`. Card per robot with kind, live online dot, and one-line state summary. |
+| `/robots/:id` | Per-robot detail: telemetry stat strip (state, mode, armed, battery, voltage, lat/lon), Leaflet map scoped to the robot's `gps` topic with 1000-point trail, JPEG camera viewport over `/ws/camera/{robot_id}`, telemetry topic table with rate + last-update, Foxglove deep link. |
 | `/pipelines` | Today: auto-discovers `/perception/*` and `/fusion/*` and offers a bag-against-pipeline replay. Phase 6: becomes a perception-service config + on/off toggle UI (e.g. lidar detection threshold, target classes); config persisted to YAML. |
 | `/rosbags` | Rosbag Manager — segmented sub-nav over the three bag operations. |
 | `/rosbags` (Browse) | GCS bag list, multipart upload, delete, expandable per-bag panel with parsed `metadata.yaml` (duration, message count, per-topic counts) and file list with download links. |
@@ -20,17 +20,18 @@ Phased Apple-style redesign in progress. Phase 1 (sidebar shell + new IA + desig
 | `/rosbags/replay` | Bag dropdown, start/stop, status, Foxglove deep link. |
 | `/ros` | Curated topics grouped by namespace, with rate + last update. Phase 3: full ROS graph (every publisher / subscriber, QoS, on-demand sampling). |
 | `/health` | `DiagnosticArray` from `/atl4s/health` with per-topic level / message / key-value pairs. Nav badge reflects worst level. Phase 4: gains per-container Docker state via mounted `/var/run/docker.sock`. |
-| `/live`, `/map` | Legacy routes, off the sidebar — kept reachable for telemetry until phase 2 lands. |
 
 ## HTTP + WebSocket surfaces
 
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/healthz` | Liveness; unauthenticated. |
+| `GET` | `/api/robots` | List robots from the registry (config + telemetry topic mapping). |
+| `GET` | `/api/robots/{id}` | One robot, or 404. |
 | `*` | `/api/*` | Streaming proxy to `rosbag-manager` (see [services/rosbag-manager/README.md](../rosbag-manager/README.md)). HTTP Basic at the edge. |
 | `WS` | `/ws/topics` | Push curated ROS topic snapshots + rates as JSON deltas. Initial snapshot on connect. |
-| `WS` | `/ws/camera` | Push JPEG-encoded `/camera/image` frames as binary WebSocket messages. |
-| `GET` | `/`, `/{path}` | Built SPA. SPA fallback for client-side routes (Bags, Live, Map…). |
+| `WS` | `/ws/camera/{robot_id}` | Push JPEG-encoded frames from the robot's camera topic as binary WebSocket messages. 4404 close if the robot has no camera configured. |
+| `GET` | `/`, `/{path}` | Built SPA. SPA fallback for client-side routes. |
 
 ## Layout
 
@@ -38,13 +39,16 @@ Phased Apple-style redesign in progress. Phase 1 (sidebar shell + new IA + desig
 services/dashboard/
 ├── Dockerfile             multi-stage (node build → ros:humble runtime)
 ├── entrypoint.sh
+├── config/
+│   └── robots.yaml        robot registry (bind-mounted, no rebuild)
 ├── backend/
 │   ├── main.py            FastAPI app, lifespan, /healthz, SPA fallback
 │   ├── config.py          env-driven config
 │   ├── auth.py            HTTP Basic (HTTP + WebSocket via header check)
 │   ├── proxy.py           streaming /api/* → rosbag-manager
-│   ├── topics.py          rclpy thread → /ws/topics fan-out + auto-discovery
-│   └── camera.py          rclpy thread → /ws/camera JPEG fan-out
+│   ├── robots.py          registry loader + /api/robots router
+│   ├── topics.py          rclpy thread → /ws/topics fan-out, subs from registry + base + /perception/* /fusion/* discovery
+│   └── camera.py          rclpy thread → /ws/camera/{robot_id} JPEG fan-out (one subscription per unique camera topic)
 └── frontend/              React + Vite + TS (lucide-react icons)
     ├── package.json
     ├── tsconfig.json
@@ -55,15 +59,15 @@ services/dashboard/
         ├── App.tsx          sidebar shell + routes + health badge
         ├── styles.css       design tokens (light/dark) + component styles
         ├── lib/
-        │   ├── api.ts       typed wrappers around /api/*
+        │   ├── api.ts       typed wrappers around /api/* + /api/robots
         │   ├── ws.ts        WebSocket helper with reconnect/backoff
         │   ├── topics.tsx   TopicProvider context (single /ws/topics)
+        │   ├── robots.ts    iconFor + isOnline / isFresh / summarize helpers
         │   ├── format.ts    bytes / dates
         │   ├── foxglove.ts  deep-link builder
         │   └── components.tsx  PageHeader, Card, StatTile, Badge, StatusDot, EmptyState, Subnav
-        └── pages/           Home / Robots / Pipelines / RosbagManager / Ros / Health
+        └── pages/           Home / Robots / RobotDetail / Pipelines / RosbagManager / Ros / Health
                              plus Bags, Record, Replay (mounted inside RosbagManager)
-                             plus legacy Live, Map (off-sidebar, removed after phase 2)
 ```
 
 ## Configuration
@@ -75,22 +79,55 @@ services/dashboard/
 | `BAG_WEB_USER` | (unset) | HTTP Basic username. Env-var name kept stable from bag-web for `.env` compatibility. |
 | `BAG_WEB_PASS` | (unset) | HTTP Basic password. Both must be set or both unset (auth disabled — only safe behind a closed firewall). |
 | `ROSBAG_MANAGER_URL` | `http://127.0.0.1:8086` | Where the proxy layer forwards bag-plane requests. |
+| `ROBOTS_CONFIG` | `/app/config/robots.yaml` | Path to the robot registry YAML (bind-mounted from `services/dashboard/config/` in compose). |
+
+## Robot registry
+
+`config/robots.yaml` lists every robot the dashboard knows about. Each entry:
+
+| Field | Required | Notes |
+|---|---|---|
+| `id` | yes | kebab-case unique id, used in URLs and the `/ws/camera/{id}` path. |
+| `name` | yes | Display name. |
+| `kind` | yes | Bucket: `simulator` / `drone` / `rover` / free text. |
+| `icon` | yes | Lucide hint: `simulator`, `drone`, `rover`, `bot`. |
+| `telemetry.state` | no | `mavros_msgs/State` — drives "Online" + mode/armed. |
+| `telemetry.battery` | no | `sensor_msgs/BatteryState` — battery panel. |
+| `telemetry.imu` | no | `sensor_msgs/Imu`. |
+| `telemetry.gps` | no | `sensor_msgs/NavSatFix` — Leaflet map. |
+| `telemetry.camera` | no | `sensor_msgs/Image` — JPEG viewport. |
+
+Online status is derived live in the frontend: a robot is Online when its `state` topic is fresh (`<5 s`) and reports `connected: true`. Robots without a `state` topic fall back to "any telemetry topic seen recently".
+
+Adding a robot:
+
+```bash
+$EDITOR services/dashboard/config/robots.yaml      # add entry
+docker compose restart dashboard                   # picks up YAML + re-subs topics
+```
+
+No rebuild required (the config dir is bind-mounted).
 
 ## Topic bridge
 
 `backend/topics.py` runs an rclpy executor in a daemon thread and subscribes (Best-Effort QoS to match the publishers) to:
 
-- `/mavros/state`, `/mavros/battery`, `/mavros/imu/data`, `/mavros/global_position/global`
-- `/atl4s/health`
+- `BASE_TOPICS` — `/atl4s/health` only.
+- Every telemetry topic referenced by every entry in `config/robots.yaml` (resolved via the `TELEMETRY_TYPES` map: `state` → `mavros_msgs/State`, `battery` → `BatteryState`, `imu` → `Imu`, `gps` → `NavSatFix`). Cameras are handled by the camera bridge instead.
 - Any topic under `/perception/*` or `/fusion/*` once it appears on the bus (rescan every 5 s via `get_topic_names_and_types()` + dynamic `get_message()`).
 
-Callbacks update an in-memory snapshot and push deltas to per-client `asyncio.Queue`s via `run_coroutine_threadsafe`. The React side mounts `TopicProvider` once at the app root so the nav badge, Live, Map, and Pipelines pages share a single WebSocket.
+Callbacks update an in-memory snapshot and push deltas to per-client `asyncio.Queue`s via `run_coroutine_threadsafe`. The React side mounts `TopicProvider` once at the app root so the nav badge, Home, Robots, and Pipelines pages share a single WebSocket.
+
+## Camera bridge
+
+`backend/camera.py` opens one `sensor_msgs/Image` subscription per unique `telemetry.camera` topic across the registry, re-encodes each frame to JPEG (quality 70) with OpenCV, and fans out to clients via `/ws/camera/{robot_id}`. The endpoint resolves the robot's camera topic from the registry; a `4404` close means no camera is configured for that robot.
 
 ## Inspecting
 
 ```bash
 docker compose logs -f dashboard
 curl -sS localhost:8089/healthz
+curl -sS -u "${BAG_WEB_USER}:${BAG_WEB_PASS}" localhost:8089/api/robots | jq
 curl -sS -u "${BAG_WEB_USER}:${BAG_WEB_PASS}" localhost:8089/api/bags | jq
 ```
 

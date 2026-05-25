@@ -1,4 +1,4 @@
-# uploader — watches /data/bags for completed bag directories and pushes
+# bag-uploader — watches /data/bags for completed bag directories and pushes
 # them to gs://${GCS_BUCKET}. On the VM, the GCE metadata server provides
 # credentials for the atl4s-vm-sa service account (no key file). On the
 # Orin Nano (Phase 5) mount a service-account JSON at /gcp-key.json and
@@ -15,6 +15,6 @@ ENV GCS_BUCKET=atl4s-rosbags
 ENV STABLE_SECONDS=15
 ENV POLL_SECONDS=10
 
-COPY uploader.py /uploader.py
+COPY bag_uploader.py /bag_uploader.py
 
-CMD ["python", "/uploader.py"]
+CMD ["python", "/bag_uploader.py"]

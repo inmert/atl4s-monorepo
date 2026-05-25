@@ -32,7 +32,7 @@ atl4s-monorepo/
 │   ├── healthcheck/          Topic-liveness monitor: stdout + HTTP /health + /atl4s/health
 │   ├── bag-web/              Browser UI for rosbags in GCS (HTTP Basic, TCP 8089)
 │   ├── bag-record/           Records selected topics to mcap (record profile)
-│   └── uploader/             Pushes completed bags to GCS (record profile)
+│   └── bag-uploader/         Pushes completed bags to GCS (record profile)
 ├── shared/                   FastDDS XML profile shared by all ROS containers
 ├── deploy/                   (Terraform, planned)
 └── scripts/                  dev-up.sh, prod-up.sh, topic-check.sh,
@@ -81,7 +81,7 @@ See [HANDOFF.md](HANDOFF.md) for the working context and open items.
 | `healthcheck` | always | Topic-liveness monitor. stdout, HTTP `:8088/health`, `/atl4s/health`. |
 | `bag-web` | always | Browser UI for `gs://atl4s-rosbags` (list / upload / download / delete). HTTP Basic on TCP 8089. |
 | `bag-record` | record | `ros2 bag record` → mcap under `data/bags/<name>/`. |
-| `uploader` | record | Pushes completed bags to `gs://atl4s-rosbags`. |
+| `bag-uploader` | record | Pushes completed bags to `gs://atl4s-rosbags`. |
 | `web-backend` | planned | FastAPI WebSocket for the custom dashboard slice of `/mavros/*` + `/atl4s/*`. Distinct from `bag-web`. |
 | `web-frontend` | planned | Browser dashboard against `web-backend`. |
 | `bag-replay` | planned | `ros2 bag play`s a GCS-stored bag back onto the DDS bus. |

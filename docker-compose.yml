@@ -147,17 +147,17 @@ services:
     depends_on:
       - mavros
 
-  uploader:
+  bag-uploader:
     <<: *common
     build:
-      context: ./services/uploader
-    image: atl4s/uploader:latest
-    container_name: atl4s-uploader
+      context: ./services/bag-uploader
+    image: atl4s/bag-uploader:latest
+    container_name: atl4s-bag-uploader
     environment:
       GCS_BUCKET: ${GCS_BUCKET:-atl4s-rosbags}
       BAG_DIR: /data/bags
-      STABLE_SECONDS: ${UPLOADER_STABLE_SECONDS:-15}
-      POLL_SECONDS: ${UPLOADER_POLL_SECONDS:-10}
+      STABLE_SECONDS: ${BAG_UPLOADER_STABLE_SECONDS:-15}
+      POLL_SECONDS: ${BAG_UPLOADER_POLL_SECONDS:-10}
     volumes:
       - ./shared/fastdds_profiles.xml:/fastdds_profiles.xml:ro
       - ./data/bags:/data/bags

@@ -1,4 +1,4 @@
-# uploader
+# bag-uploader
 
 Watches `/data/bags` and pushes completed bag directories to `gs://${GCS_BUCKET}`. Idempotent across restarts via a `<bag>.uploaded` sentinel file written next to each uploaded bag.
 
@@ -22,11 +22,11 @@ On the VM, the GCE metadata server provides credentials for the `atl4s-vm-sa` se
 Under the `record` profile, alongside `bag-record`:
 
 ```bash
-docker compose --profile sim --profile record up -d bag-record uploader
+docker compose --profile sim --profile record up -d bag-record bag-uploader
 ```
 
 Standalone (e.g. to upload bags placed in `./data/bags/` by hand):
 
 ```bash
-docker compose --profile record up -d uploader
+docker compose --profile record up -d bag-uploader
 ```

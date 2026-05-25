@@ -1,5 +1,5 @@
 # bag-web — FastAPI server for browsing/uploading/deleting rosbags in
-# gs://${GCS_BUCKET}. Mirrors the uploader's GCS auth path: GCE metadata
+# gs://${GCS_BUCKET}. Mirrors the bag-uploader's GCS auth path: GCE metadata
 # server on the VM (no key file).
 
 FROM python:3.11-slim

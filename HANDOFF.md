@@ -60,7 +60,7 @@ atl4s-monorepo/
 │   ├── healthcheck/          Topic-liveness monitor; stdout + HTTP /health + /atl4s/health
 │   ├── bag-web/              Browser UI for the GCS bag bucket (HTTP Basic auth, TCP 8089)
 │   ├── bag-record/           Records selected topics to mcap (record profile)
-│   └── uploader/             Pushes completed bags to GCS (record profile)
+│   └── bag-uploader/         Pushes completed bags to GCS (record profile)
 ├── shared/
 │   └── fastdds_profiles.xml  shared FastDDS XML (see gotchas)
 ├── data/bags/                (gitignored) local staging area for bags before upload
@@ -103,7 +103,7 @@ atl4s-monorepo/
 - Foxglove: WebSocket on `0.0.0.0:8765`. BE whitelist covers `/imu/gazebo`, `/clock`, `/mavros/.*`, `/uas1/.*` (raw MAVLink dropped silently without the last one).
 - Commander: low-battery → `set_mode RTL` verified end-to-end (forced via `BATTERY_LOW_THRESHOLD=1.0`).
 - Healthcheck: tracks 7 topics, reports stdout summary every 5 s, HTTP `GET /health` on `:8088` (200/503), publishes `/atl4s/health` (DiagnosticArray) for Foxglove.
-- bag-record + uploader: verified end-to-end via `./scripts/bag-record.sh 10 atl4s-gazebo-test` — 40.8 MiB mcap with 10080 messages including 44 camera frames, uploaded to `gs://atl4s-rosbags/atl4s-gazebo-test/`.
+- bag-record + bag-uploader: verified end-to-end via `./scripts/bag-record.sh 10 atl4s-gazebo-test` — 40.8 MiB mcap with 10080 messages including 44 camera frames, uploaded to `gs://atl4s-rosbags/atl4s-gazebo-test/`.
 - bag-web: browser UI on `:8089` for listing/uploading/deleting bags in `gs://atl4s-rosbags`. HTTP Basic auth via `BAG_WEB_USER` / `BAG_WEB_PASS` in `.env`.
 
 Verify:
@@ -186,7 +186,7 @@ Two harmless messages on every `atl4s-gazebo` start:
 
 ### Compose volume merge
 
-Same trap as the env merge above: a service-level `volumes:` list silently replaces `x-common.volumes`. Any service that adds its own volume mounts must re-declare the FastDDS profile mount or lose it. `bag-record` and `uploader` both do this with a one-line comment at the call site.
+Same trap as the env merge above: a service-level `volumes:` list silently replaces `x-common.volumes`. Any service that adds its own volume mounts must re-declare the FastDDS profile mount or lose it. `bag-record` and `bag-uploader` both do this with a one-line comment at the call site.
 
 ## Service inventory
 
@@ -201,7 +201,7 @@ Same trap as the env merge above: a service-level `volumes:` list silently repla
 | 7 | `healthcheck` | running | always | Topic-liveness monitor. Stdout summary + HTTP `/health` on 8088 + `/atl4s/health` (DiagnosticArray). |
 | 8 | `bag-web` | running | always | Browser UI for `gs://atl4s-rosbags`. HTTP Basic on TCP 8089. Create + view + download + delete. |
 | 9 | `bag-record` | running | record | `ros2 bag record` → mcap under `data/bags/<name>/`. Topics via `RECORD_TOPICS`. |
-| 10 | `uploader` | running | record | Watches `data/bags`; uploads completed bag dirs to `gs://atl4s-rosbags`. Idempotent via `<bag>.uploaded` sentinel. VM service account via metadata server. |
+| 10 | `bag-uploader` | running | record | Watches `data/bags`; uploads completed bag dirs to `gs://atl4s-rosbags`. Idempotent via `<bag>.uploaded` sentinel. VM service account via metadata server. |
 | 11 | `web-backend` | planned | — | FastAPI WebSocket subscribing to curated `/mavros/*` + `/atl4s/*` slice; foundation for the custom UI distinct from Foxglove. |
 | 12 | `web-frontend` | planned | — | Browser dashboard against `web-backend`. |
 | 13 | `bag-replay` | planned | — | Pulls a bag from GCS by name and `ros2 bag play`s it onto the DDS bus. One-shot. |
@@ -228,7 +228,7 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
 2. **First perception service (`perception-detector`)** — stand up `shared/atl4s_msgs/` for Detection types, then `services/perception-detector` (CUDA base + YOLO on `/camera/image`). First use of the L4 GPU for inference.
 3. **`web-backend` + `web-frontend`** — FastAPI WebSocket service for a curated `/mavros/*` + `/atl4s/*` slice, plus a browser dashboard. Distinct from `bag-web`, which is GCS-only. Becomes the custom UI replacing Foxglove for operational views.
 4. **`bag-replay` service** — pulls a bag from GCS by name and `ros2 bag play`s it onto the DDS bus. Useful once perception services exist (replay recorded camera frames against the detector). Pattern: one-shot `docker compose run --rm bag-replay BAG=<name>`.
-5. **Drone integration (Orin Nano)** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. Orin-side `bag-record` + `uploader` push real RealSense + lidar bags to GCS. Zenoh bridge for ROS topics over WAN comes at the end (`ingestion` service).
+5. **Drone integration (Orin Nano)** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. Orin-side `bag-record` + `bag-uploader` push real RealSense + lidar bags to GCS. Zenoh bridge for ROS topics over WAN comes at the end (`ingestion` service).
 6. **B.3 — lidar in Gazebo (parked).** Attempted: gpu_lidar block in `services/gazebo/world/models/atl4s_lidar/` + composite `iris_with_lidar` model + `atl4s.sdf` world. Even at 90×4 rays @ 1 Hz the render back-pressures the JSON-FDM loop — SITL logs continuous `No JSON sensor message received, resending servos`. Retry path: lighter ray budget (e.g. 16×1), async sensor rendering, or skip Gazebo lidar entirely and validate `perception-lidar` against real Orin/RealSense data later. Files were rolled back; not in the repo today.
 7. **Security tightening** — IAP-only SSH (`35.235.240.0/20`), Foxglove / web behind Tailscale, per-team IAM bindings. Defer until test phase is over.
 8. **GCS bucket region** — bucket is us-east4 but VM is northamerica-northeast1; consider recreating co-located for production traffic.
@@ -245,7 +245,7 @@ docker compose --profile sim --profile record down  # stop everything
 # Record + upload (record profile)
 ./scripts/bag-record.sh 30                # record 30s, wait for upload
 ./scripts/bag-list.sh                     # list bags in GCS
-docker compose --profile record up -d uploader  # uploader only (e.g. drop bags in by hand)
+docker compose --profile record up -d bag-uploader  # bag-uploader only (e.g. drop bags in by hand)
 
 # Logs
 docker compose logs -f

@@ -2,7 +2,7 @@
 
 Minimal FastAPI + HTML page for browsing, uploading, and deleting rosbags stored in `gs://${GCS_BUCKET}`.
 
-A "bag" is one top-level prefix in the bucket (matches the layout `uploader` produces from `ros2 bag record` output).
+A "bag" is one top-level prefix in the bucket (matches the layout `bag-uploader` produces from `ros2 bag record` output).
 
 ## Surfaces
 

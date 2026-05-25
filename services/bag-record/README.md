@@ -15,14 +15,14 @@ Records selected ROS 2 topics to an mcap bag under `/data/bags/<name>/`.
 Under the `record` profile so it does not run by default:
 
 ```bash
-docker compose --profile sim --profile record up -d bag-record uploader
+docker compose --profile sim --profile record up -d bag-record bag-uploader
 ```
 
-The `uploader` service watches the same directory and pushes completed bags to GCS automatically. See [scripts/bag-record.sh](../../scripts/bag-record.sh) for a wrapper that records for a fixed duration and stops cleanly.
+The `bag-uploader` service watches the same directory and pushes completed bags to GCS automatically. See [scripts/bag-record.sh](../../scripts/bag-record.sh) for a wrapper that records for a fixed duration and stops cleanly.
 
 ## Stopping
 
-`docker stop atl4s-bag-record`. SIGTERM reaches `ros2 bag record` (the entrypoint uses `exec`), which closes the bag cleanly. After ~15 s of stability, `uploader` pushes it to GCS.
+`docker stop atl4s-bag-record`. SIGTERM reaches `ros2 bag record` (the entrypoint uses `exec`), which closes the bag cleanly. After ~15 s of stability, `bag-uploader` pushes it to GCS.
 
 ## QoS
 

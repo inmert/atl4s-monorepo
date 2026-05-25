@@ -18,7 +18,7 @@ GCS_BUCKET = os.environ['GCS_BUCKET']
 STABLE_SECONDS = int(os.environ.get('STABLE_SECONDS', '15'))
 POLL_SECONDS = int(os.environ.get('POLL_SECONDS', '10'))
 
-log = logging.getLogger('uploader')
+log = logging.getLogger('bag-uploader')
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
 

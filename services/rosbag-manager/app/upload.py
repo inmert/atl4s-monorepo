@@ -13,19 +13,14 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from google.cloud import storage
 
+from app.clients import bucket
 from app.config import BAG_DIR, GCS_BUCKET, POLL_SECONDS, STABLE_SECONDS
+from app.util import safe_bag_name
 
 log = logging.getLogger('rosbag-manager.upload')
 
 router = APIRouter(prefix='/api/uploads', tags=['uploads'])
-
-
-def _safe_bag_name(name: str) -> str:
-    if not name or '/' in name or name in ('.', '..'):
-        raise HTTPException(400, 'invalid bag name')
-    return name
 
 
 def _iso(ts: Optional[float]) -> Optional[str]:
@@ -33,18 +28,12 @@ def _iso(ts: Optional[float]) -> Optional[str]:
 
 
 class Uploader:
-    """Lazy GCS client + watcher task + per-bag in-flight set."""
+    """Watcher task + per-bag in-flight set; uploads use the shared GCS client."""
 
     def __init__(self) -> None:
-        self._client: Optional[storage.Client] = None
         self._in_flight: set[str] = set()
         self._task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
-
-    def bucket(self) -> storage.Bucket:
-        if self._client is None:
-            self._client = storage.Client()
-        return self._client.bucket(GCS_BUCKET)
 
     def _local_bags(self) -> list[Path]:
         BAG_DIR.mkdir(parents=True, exist_ok=True)
@@ -85,13 +74,13 @@ class Uploader:
                 self._in_flight.discard(bag.name)
 
     def _upload_blocking(self, bag: Path) -> int:
-        bucket = self.bucket()
+        b = bucket()
         count = 0
         for path in bag.rglob('*'):
             if not path.is_file():
                 continue
             blob_name = f'{bag.name}/{path.relative_to(bag).as_posix()}'
-            blob = bucket.blob(blob_name)
+            blob = b.blob(blob_name)
             if blob.exists():
                 log.info('skip %s (already in gs://%s/%s)', path.name, GCS_BUCKET, blob_name)
                 continue
@@ -151,7 +140,7 @@ def list_uploads() -> list[dict]:
 
 @router.post('/{bag_name}')
 async def force_upload(bag_name: str) -> dict:
-    _safe_bag_name(bag_name)
+    safe_bag_name(bag_name)
     bag = BAG_DIR / bag_name
     if not bag.is_dir():
         raise HTTPException(404, f'{bag_name} not found in {BAG_DIR}')

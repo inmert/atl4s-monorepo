@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.config import BAG_DIR, DEFAULT_RECORD_TOPICS
+from app.util import safe_bag_name
 
 log = logging.getLogger('rosbag-manager.record')
 
@@ -20,12 +21,6 @@ class StartRequest(BaseModel):
     name: Optional[str] = None
     topics: Optional[list[str]] = None
     duration: Optional[float] = None
-
-
-def _safe_bag_name(name: str) -> str:
-    if not name or '/' in name or name in ('.', '..'):
-        raise HTTPException(400, 'invalid bag name')
-    return name
 
 
 def _qos_overrides_yaml(topics: list[str]) -> str:
@@ -71,7 +66,7 @@ class Recorder:
             if self.state != 'idle':
                 raise HTTPException(409, f'already {self.state}')
 
-            name = _safe_bag_name(
+            name = safe_bag_name(
                 name or f'atl4s-{datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")}'
             )
             topics = topics or DEFAULT_RECORD_TOPICS

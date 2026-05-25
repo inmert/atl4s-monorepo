@@ -8,7 +8,7 @@ Consumed by `dashboard`, by `scripts/bag-record.sh`, and by any future caller ru
 
 ## Endpoints
 
-GCS browser and replay land in subsequent commits (see HANDOFF open item 3).
+Replay lands in the next commit (see HANDOFF open item 3).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -18,6 +18,11 @@ GCS browser and replay land in subsequent commits (see HANDOFF open item 3).
 | `GET` | `/api/record/status` | `{state, name, topics, output, started_at}` with `state ∈ {idle, recording, stopping}`. |
 | `GET` | `/api/uploads` | Per-bag status of every directory in `${BAG_DIR}`: `{name, size_bytes, files, mtime, uploaded, in_flight}`. |
 | `POST` | `/api/uploads/{name}` | Force-upload a bag now without waiting for the stable window. 409 if already uploading or uploaded. |
+| `GET` | `/api/bags` | List bags in `gs://${GCS_BUCKET}`: `[{name, size_bytes, size_mib, files, updated}]`. |
+| `GET` | `/api/bags/{name}/files` | List blobs inside a GCS bag. |
+| `GET` | `/api/bags/{name}/files/{filename}` | Stream-download one file from GCS. |
+| `POST` | `/api/bags/{name}/upload` | Multipart push to GCS; field name `files` (repeatable). |
+| `DELETE` | `/api/bags/{name}` | Delete every blob under the prefix. Irreversible. |
 
 A per-recording QoS overrides file at `/tmp/qos-<name>.yaml` forces Best Effort on every topic — required for `/mavros/*`, which `ros2 bag record` otherwise misses silently. A background watcher checks `${BAG_DIR}` every `POLL_SECONDS` and uploads any bag whose newest file has been quiet for `STABLE_SECONDS`; uploaded bags are marked with a sibling `<name>.uploaded` sentinel so restarts don't re-upload.
 

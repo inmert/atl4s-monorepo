@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.config import BAG_DIR, GCS_BUCKET
+from app.gcs import router as gcs_router
 from app.record import on_shutdown as record_shutdown
 from app.record import router as record_router
 from app.upload import on_shutdown as upload_shutdown
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title='ATL4S rosbag-manager', lifespan=lifespan)
 app.include_router(record_router)
 app.include_router(upload_router)
+app.include_router(gcs_router)
 
 
 @app.get('/healthz')

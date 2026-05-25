@@ -1,14 +1,14 @@
 # foxglove
 
-Foxglove Bridge — exposes ROS 2 topics over a WebSocket so a browser-based [Foxglove Studio](https://studio.foxglove.dev/) client can subscribe to them.
+[Foxglove Bridge](https://github.com/foxglove/ros-foxglove-bridge) — exposes ROS 2 topics and services over a WebSocket so [Foxglove Studio](https://studio.foxglove.dev/) can subscribe in a browser.
 
 ## Output
 
 | Endpoint | Direction | Consumer |
 |---|---|---|
-| TCP `0.0.0.0:8765` | listening | Foxglove Studio (browser) |
+| TCP `0.0.0.0:8765` | listening | Foxglove Studio |
 
-Container uses `network_mode: host`, so the port binds on the VM's external interface directly. QoS is auto-negotiated per topic, so `/mavros/*` (Best Effort) is handled without extra configuration.
+`network_mode: host`, so the port binds on the VM's external interface directly.
 
 ## Configuration
 
@@ -17,12 +17,12 @@ Container uses `network_mode: host`, so the port binds on the VM's external inte
 | `FOXGLOVE_PORT` | `8765` | WebSocket port |
 | `FOXGLOVE_ADDRESS` | `0.0.0.0` | Bind address |
 
+## Message packages
+
+The image installs `ros-humble-mavros-msgs` so the bridge can expose `/mavros/*` services to Studio. Add the `-msgs` package of every new ATL4S service that exposes services.
+
 ## Connecting
 
-In Foxglove Studio:
+In Foxglove Studio: Open connection → Foxglove WebSocket → `ws://<VM_external_IP>:8765`.
 
-1. Open `https://studio.foxglove.dev/`.
-2. Click "Open connection".
-3. Choose "Foxglove WebSocket" and enter `ws://<VM_external_IP>:8765`.
-
-The GCP firewall rule `allow-foxglove-test` (TCP 8765 from `0.0.0.0/0`) must be in place. This rule is intentionally permissive for the test phase and should be tightened before production exposure.
+GCP firewall rule `allow-foxglove-test` (TCP 8765 from `0.0.0.0/0`) must be in place. Tighten before production.

@@ -1,6 +1,5 @@
-# commander — autonomy node for ATL4S
-# Subscribes to MAVROS telemetry, applies decision logic, will publish
-# commands back to MAVROS as behaviors are added.
+# commander — autonomy node. Subscribes to MAVROS telemetry and calls
+# MAVROS services in response.
 
 FROM ros:humble-ros-base
 

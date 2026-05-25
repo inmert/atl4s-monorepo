@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Trap signals so both processes shut down cleanly on docker stop.
+# Forward SIGTERM/SIGINT to children so docker stop is clean.
 trap 'kill $(jobs -p) 2>/dev/null; exit 0' SIGTERM SIGINT
 
 echo "[entrypoint] Starting arducopter..."
@@ -12,10 +12,6 @@ echo "[entrypoint] Starting arducopter..."
     --base-port 5760 \
     &
 
-ARDU_PID=$!
-echo "[entrypoint] arducopter PID=${ARDU_PID}"
-
-# Wait for arducopter's TCP master to be ready.
 echo "[entrypoint] Waiting for arducopter TCP 5760..."
 for i in {1..30}; do
     if (echo > /dev/tcp/127.0.0.1/5760) 2>/dev/null; then
@@ -26,20 +22,15 @@ for i in {1..30}; do
 done
 
 echo "[entrypoint] Starting MAVProxy, forwarding to ${MAVPROXY_OUT}..."
-
-# NO --daemon: keep mavproxy in the foreground so the container stays alive.
-# --non-interactive: disable the prompt.
-# --logfile /tmp/mavproxy.log: capture mavproxy's internal logs.
+# Foreground, NOT --daemon — otherwise mavproxy double-forks, PID 1 exits,
+# and the container restart-loops.
 mavproxy.py \
     --master tcp:127.0.0.1:5760 \
     --out "${MAVPROXY_OUT}" \
     --non-interactive \
     --logfile /tmp/mavproxy.log &
 
-MAVP_PID=$!
-echo "[entrypoint] MAVProxy PID=${MAVP_PID}"
-
-# Wait on either process; exit if either dies.
+# Exit if either process dies so the supervisor restarts the whole unit.
 wait -n
 echo "[entrypoint] One process exited. Shutting down."
 kill $(jobs -p) 2>/dev/null || true

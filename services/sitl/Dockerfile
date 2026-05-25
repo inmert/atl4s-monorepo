@@ -37,10 +37,8 @@ ENV SITL_HOME_ALT=5
 ENV SITL_HOME_HEADING=0
 ENV SITL_SPEEDUP=1
 
-# MAVProxy `--out` target. `udp:` is bidirectional — MAVProxy sends from a
-# local ephemeral port and listens for replies on it, so MAVROS commands round
-# -trip back to ArduPilot. `udpout:` would be send-only (telemetry only).
-# Both containers use host networking, so 127.0.0.1 resolves to the VM loopback.
+# MAVProxy `--out` target. `udp:` is bidirectional (commands round-trip);
+# `udpout:` is send-only and silently breaks commands from MAVROS.
 ENV MAVPROXY_OUT=udp:127.0.0.1:14550
 
 EXPOSE 5760/tcp 14550/udp

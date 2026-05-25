@@ -5,11 +5,9 @@ FROM ros:humble-ros-base
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# mavros_msgs is required for foxglove_bridge to expose /mavros/* services
-# (arming, set_mode, param/*, etc.) to Studio. Without it the bridge logs a
-# WARN per service and the topic stream still works, but Studio can't issue
-# service calls back to MAVROS. Add the -msgs package of every other ATL4S
-# service that exposes services as those services come online.
+# mavros_msgs lets the bridge expose /mavros/* services (arming, set_mode,
+# param/*) to Studio. Without it the bridge WARNs and only topics work.
+# Add the -msgs package of every new service that exposes services.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-humble-foxglove-bridge \
         ros-humble-mavros-msgs \

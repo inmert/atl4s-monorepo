@@ -1,20 +1,17 @@
 # ATL4S service stack.
-# Bring up via scripts/dev-up.sh (dev, includes the `sim` profile) or
-# scripts/prod-up.sh (prod, no SITL).
+# Bring up via scripts/dev-up.sh (includes the `sim` profile) or
+# scripts/prod-up.sh (no SITL).
 
-# Shared per-service settings.
 x-common: &common
   network_mode: host
   restart: unless-stopped
   volumes:
-    # FastDDS profile disabling SHM transport. Required for cross-container
-    # data delivery — without it, DDS discovery works but message data
-    # silently never arrives between containers with separate /dev/shm.
+    # Disables FastDDS shared-memory transport; required for cross-container
+    # data delivery (containers share the network namespace but not /dev/shm).
     - ./shared/fastdds_profiles.xml:/fastdds_profiles.xml:ro
 
-# Shared environment vars. Merged into each service's environment via `<<:`.
-# Must be a map (not a list) for YAML merge to work; service-level lists would
-# replace this entirely.
+# Map form (not list) so the YAML <<: merge into each service's environment
+# actually adds keys instead of replacing the whole list.
 x-shared-env: &shared-env
   ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
   FASTRTPS_DEFAULT_PROFILES_FILE: /fastdds_profiles.xml

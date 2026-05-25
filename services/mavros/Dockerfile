@@ -1,6 +1,6 @@
-# MAVROS — bridges MAVLink (UDP) to ROS 2 topics.
-# Binds UDP 14550. Source is the in-container MAVProxy under SITL, or the
-# Orin Nano forwarding MAVLink to the VM's external IP in production.
+# MAVROS — MAVLink (UDP) ⇄ ROS 2 topics. Binds UDP 14550.
+# Source is the in-container MAVProxy under SITL, or the Orin Nano
+# forwarding MAVLink to the VM's external IP in production.
 
 FROM ros:humble-ros-base
 
@@ -20,8 +20,8 @@ RUN wget -q https://raw.githubusercontent.com/mavlink/mavros/ros2/mavros/scripts
     && rm install_geographiclib_datasets.sh
 
 # URL format: udp://[bind][:port]@[remote][:port]. `udp://:14550@` binds on
-# 0.0.0.0:14550, no remote. Do NOT use `udp://@:14550` — that binds the default
-# port 14555 and treats :14550 as the remote, silently breaking ingestion.
+# 0.0.0.0:14550, no remote. `udp://@:14550` would bind the default port 14555
+# and treat :14550 as the remote — silently breaks ingestion.
 ENV FCU_URL="udp://:14550@"
 ENV GCS_URL=""
 

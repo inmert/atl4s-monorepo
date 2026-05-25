@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""commander — first-cut autonomy node for ATL4S.
-
-Subscribes to /mavros/battery and /mavros/state with Best Effort QoS
-(matches what MAVROS offers). Logs threshold crossings and state
-transitions, and on a low-battery latch calls /mavros/set_mode RTL.
-"""
+"""Commander — subscribes to MAVROS telemetry and calls /mavros/set_mode RTL on a low-battery latch."""
 
 import rclpy
 from rclpy.node import Node
@@ -15,11 +10,8 @@ from mavros_msgs.srv import SetMode
 from sensor_msgs.msg import BatteryState
 
 
-# 5% hysteresis above the low threshold before clearing the latch — avoids
-# flapping when the battery hovers near the trip point.
+# Hysteresis above the trip point before clearing the latch — avoids flapping.
 BATTERY_HYSTERESIS = 0.05
-
-# Mode commander switches to on a low-battery latch.
 LOW_BATTERY_MODE = 'RTL'
 
 
@@ -44,13 +36,11 @@ class Commander(Node):
         qos = best_effort_qos()
         self.create_subscription(BatteryState, '/mavros/battery', self.on_battery, qos)
         self.create_subscription(State, '/mavros/state', self.on_state, qos)
-
         self.set_mode_client = self.create_client(SetMode, '/mavros/set_mode')
 
         self.get_logger().info(
-            f'commander up. Watching /mavros/battery '
-            f'(threshold {self.battery_low_threshold:.0%}, hysteresis {BATTERY_HYSTERESIS:.0%}) '
-            f'and /mavros/state. Low-battery action: set_mode {LOW_BATTERY_MODE}.'
+            f'commander up. threshold {self.battery_low_threshold:.0%}, '
+            f'hysteresis {BATTERY_HYSTERESIS:.0%}, low-battery action: set_mode {LOW_BATTERY_MODE}.'
         )
 
     def on_battery(self, msg: BatteryState) -> None:
@@ -73,9 +63,7 @@ class Commander(Node):
             )
         else:
             if msg.connected != self.last_state.connected:
-                self.get_logger().warn(
-                    f'Connection: {self.last_state.connected} -> {msg.connected}.'
-                )
+                self.get_logger().warn(f'Connection: {self.last_state.connected} -> {msg.connected}.')
             if msg.mode != self.last_state.mode:
                 self.get_logger().info(f'Mode: {self.last_state.mode} -> {msg.mode}.')
             if msg.armed != self.last_state.armed:
@@ -84,10 +72,7 @@ class Commander(Node):
 
     def _trigger_low_battery_mode(self) -> None:
         if not self.set_mode_client.service_is_ready():
-            self.get_logger().error(
-                '/mavros/set_mode is not available; cannot trigger '
-                f'{LOW_BATTERY_MODE}.'
-            )
+            self.get_logger().error(f'/mavros/set_mode unavailable; cannot trigger {LOW_BATTERY_MODE}.')
             return
         req = SetMode.Request()
         req.custom_mode = LOW_BATTERY_MODE
@@ -104,8 +89,7 @@ class Commander(Node):
             self.get_logger().info(f'set_mode {LOW_BATTERY_MODE} accepted.')
         else:
             self.get_logger().error(
-                f'set_mode {LOW_BATTERY_MODE} rejected by MAVROS '
-                '(mode_sent=False; vehicle may not be in a state that allows it).'
+                f'set_mode {LOW_BATTERY_MODE} rejected (mode_sent=False).'
             )
 
 

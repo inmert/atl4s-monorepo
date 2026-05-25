@@ -6,19 +6,19 @@ ArduPilot SITL — ArduCopter simulator producing a MAVLink stream identical to 
 
 Two processes inside the container:
 
-1. `arducopter` — ArduPilot SITL binary, MAVLink master on TCP `127.0.0.1:5760`.
-2. `mavproxy.py` — connects to the TCP master and fans the stream out over UDP.
+1. `arducopter` — MAVLink master on TCP `127.0.0.1:5760`.
+2. `mavproxy.py` — connects to the TCP master and forwards over UDP.
 
-The entrypoint launches both, then `wait -n` exits the container if either dies (so the supervisor can restart the whole unit cleanly).
+The entrypoint launches both, then `wait -n` exits the container if either dies so the supervisor restarts the whole unit.
 
 ## Output
 
 | Endpoint | Direction | Consumer |
 |---|---|---|
 | TCP `127.0.0.1:5760` | listening | MAVProxy (in-container) |
-| UDP `127.0.0.1:14550` | bidirectional (`udp:` from MAVProxy) | `mavros` |
+| UDP `127.0.0.1:14550` | bidirectional (`udp:`) | `mavros` |
 
-The container uses `network_mode: host`, so `127.0.0.1` resolves to the VM loopback. MAVProxy uses `udp:` (bidirectional) — it binds a local ephemeral port, sends from it to MAVROS, and listens for replies on it. MAVROS commands round-trip back to ArduPilot. Use `udpout:` only if you explicitly want a send-only channel.
+`network_mode: host`, so `127.0.0.1` is the VM loopback. MAVProxy uses `udp:` so MAVROS commands round-trip back to ArduPilot. Use `udpout:` only for an explicitly send-only channel.
 
 ## Configuration
 
@@ -29,11 +29,11 @@ The container uses `network_mode: host`, so `127.0.0.1` resolves to the VM loopb
 | `SITL_HOME_ALT` | `5` | Home altitude (m) |
 | `SITL_HOME_HEADING` | `0` | Home heading (deg) |
 | `SITL_SPEEDUP` | `1` | Simulation speed multiplier |
-| `MAVPROXY_OUT` | `udp:127.0.0.1:14550` | MAVProxy `--out` target (bidirectional) |
+| `MAVPROXY_OUT` | `udp:127.0.0.1:14550` | MAVProxy `--out` target |
 
 ## Build
 
-First build compiles ArduPilot from source. Expect 15–25 minutes. Subsequent builds use the Docker layer cache.
+First build compiles ArduPilot from source (15–25 min). Subsequent builds use the Docker layer cache.
 
 ## Activation
 
@@ -43,4 +43,4 @@ Only starts under the `sim` profile:
 docker compose --profile sim up -d sitl
 ```
 
-`./scripts/dev-up.sh` includes the profile; `./scripts/prod-up.sh` does not.
+`dev-up.sh` includes the profile; `prod-up.sh` does not.

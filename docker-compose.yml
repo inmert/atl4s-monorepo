@@ -127,6 +127,22 @@ services:
       BAG_WEB_USER: ${BAG_WEB_USER:-}
       BAG_WEB_PASS: ${BAG_WEB_PASS:-}
 
+  rosbag-manager:
+    <<: *common
+    build:
+      context: ./services/rosbag-manager
+    image: atl4s/rosbag-manager:latest
+    container_name: atl4s-rosbag-manager
+    environment:
+      <<: *shared-env
+      BAG_DIR: /data/bags
+      GCS_BUCKET: ${GCS_BUCKET:-atl4s-rosbags}
+      ROSBAG_MANAGER_BIND: ${ROSBAG_MANAGER_BIND:-127.0.0.1}
+      ROSBAG_MANAGER_PORT: ${ROSBAG_MANAGER_PORT:-8086}
+    volumes:
+      - ./shared/fastdds_profiles.xml:/fastdds_profiles.xml:ro
+      - ./data/bags:/data/bags
+
   bag-record:
     <<: *common
     build:

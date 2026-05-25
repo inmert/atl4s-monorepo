@@ -1,12 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
-import { jsonSocket, blobSocket } from '../lib/ws';
-
-type TopicMsg = {
-  topic: string;
-  data: any;
-  rate: number;
-  ts: number;
-};
+import { useTopics } from '../lib/topics';
+import { blobSocket } from '../lib/ws';
 
 function fmtPct(v: number | null | undefined): string {
   if (v === null || v === undefined || Number.isNaN(v)) return '—';
@@ -36,20 +30,10 @@ function Stat({
 }
 
 export function Live() {
-  const [topics, setTopics] = useState<Record<string, TopicMsg>>({});
+  const { topics, status: wsStatus } = useTopics();
   const [cameraUrl, setCameraUrl] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [wsStatus, setWsStatus] = useState<'open' | 'closed'>('closed');
   const lastUrlRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    const ws = jsonSocket<TopicMsg>(
-      '/ws/topics',
-      (msg) => setTopics((s) => ({ ...s, [msg.topic]: msg })),
-      setWsStatus,
-    );
-    return () => ws.close();
-  }, []);
 
   useEffect(() => {
     const ws = blobSocket('/ws/camera', (blob) => {

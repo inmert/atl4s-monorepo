@@ -103,3 +103,160 @@ pre {
     font-family: var(--font-mono);
     font-size: 13px;
 }
+
+.error {
+    color: var(--err);
+    background: rgba(229, 57, 53, 0.1);
+    border: 1px solid rgba(229, 57, 53, 0.4);
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+}
+
+.page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.page-header h1 {
+    margin: 0;
+}
+
+button,
+input[type="text"],
+input[type="file"],
+input[type="number"] {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font: inherit;
+}
+
+input[type="text"]::placeholder {
+    color: var(--text-dim);
+}
+
+button {
+    cursor: pointer;
+}
+
+button:hover {
+    border-color: var(--accent);
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+button.link {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    padding: 0;
+    text-align: left;
+}
+
+button.link:hover {
+    color: var(--accent);
+    border: none;
+}
+
+button.link .caret {
+    display: inline-block;
+    width: 1em;
+    color: var(--text-dim);
+}
+
+button.ghost {
+    background: transparent;
+}
+
+button.danger {
+    background: transparent;
+    color: var(--err);
+    border-color: rgba(229, 57, 53, 0.4);
+}
+
+button.danger:hover {
+    background: rgba(229, 57, 53, 0.1);
+    border-color: var(--err);
+}
+
+a {
+    color: var(--accent);
+}
+
+.upload-form {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 12px 0 20px;
+    padding: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.upload-form input[type="text"] {
+    width: 240px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+table.bags {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+table.bags > thead > tr > th {
+    text-align: left;
+    padding: 10px 12px;
+    color: var(--text-dim);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    font-weight: 500;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+table.bags > tbody > tr > td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+
+table.bags > tbody > tr:last-child > td {
+    border-bottom: none;
+}
+
+table.bags tr.files-row > td {
+    background: rgba(0, 0, 0, 0.18);
+    padding: 0 12px 8px 36px;
+}
+
+table.files {
+    margin-top: 4px;
+}
+
+table.files tr td {
+    padding: 4px 8px;
+    border-bottom: 1px dashed var(--border);
+    color: var(--text-dim);
+}
+
+table.files tr:last-child td {
+    border-bottom: none;
+}

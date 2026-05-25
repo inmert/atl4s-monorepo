@@ -30,7 +30,7 @@ atl4s-monorepo/
 │   ├── foxglove/             ROS 2 topics → WebSocket on TCP 8765
 │   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
 │   ├── healthcheck/          Topic-liveness monitor: stdout + HTTP /health + /atl4s/health
-│   ├── bag-web/              Browser UI for rosbags in GCS (HTTP Basic, TCP 8089)
+│   ├── dashboard/            Operator UI: live view, bags, record/replay, pipelines, health (HTTP Basic, TCP 8089)
 │   └── rosbag-manager/       HTTP API for bag-plane ops: record / upload / GCS browser / replay (loopback 127.0.0.1:8086)
 ├── shared/                   FastDDS XML profile shared by all ROS containers
 ├── deploy/                   (Terraform, planned)
@@ -78,9 +78,8 @@ See [HANDOFF.md](HANDOFF.md) for the working context and open items.
 | `foxglove` | always | Browser visualization via `foxglove_bridge`, TCP 8765. |
 | `commander` | always | Autonomy node. Low-battery latch → `set_mode RTL`. |
 | `healthcheck` | always | Topic-liveness monitor. stdout, HTTP `:8088/health`, `/atl4s/health`. |
-| `bag-web` | always | Browser UI for `gs://atl4s-rosbags` (list / upload / download / delete). HTTP Basic on TCP 8089. Scheduled for removal once `dashboard` reaches bag-browser parity. |
 | `rosbag-manager` | always | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser, replay via `ros2 bag play`. Loopback on `127.0.0.1:8086`. Consumed by `dashboard`, `scripts/bag-record.sh`, and any future host caller. |
-| `dashboard` | planned | Single human-facing surface on TCP 8089 (inherits bag-web's port + HTTP Basic creds). Live topic view (`/mavros/*`, `/atl4s/*`, camera, `/perception/*`) via rclpy → WebSocket; bag browser / record / replay UI proxied to `rosbag-manager`. React + Vite + TS frontend, FastAPI + rclpy backend in one image. Subsumes the planned web-backend / web-frontend; supersedes bag-web's UI. |
+| `dashboard` | always | Single human-facing surface on TCP 8089 with HTTP Basic. Streaming proxy to `rosbag-manager` for all bag-plane API calls. Live topic view, raw data viewer, camera, map, health, pipelines pages land incrementally — see HANDOFF item 3. React + Vite + TS frontend, FastAPI + rclpy backend in one image. |
 | `perception-detector` | planned | Object detection on the L4 GPU (first GPU service, first user of `shared/atl4s_msgs/`). |
 | `perception-segmenter` | planned | Segmentation. |
 | `perception-fault` | planned | Fault / anomaly detection. |

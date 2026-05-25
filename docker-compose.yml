@@ -114,19 +114,6 @@ services:
     depends_on:
       - mavros
 
-  bag-web:
-    # Non-ROS; uses x-common only for restart policy + host networking.
-    <<: *common
-    build:
-      context: ./services/bag-web
-    image: atl4s/bag-web:latest
-    container_name: atl4s-bag-web
-    environment:
-      GCS_BUCKET: ${GCS_BUCKET:-atl4s-rosbags}
-      BAG_WEB_PORT: ${BAG_WEB_PORT:-8089}
-      BAG_WEB_USER: ${BAG_WEB_USER:-}
-      BAG_WEB_PASS: ${BAG_WEB_PASS:-}
-
   rosbag-manager:
     <<: *common
     build:
@@ -157,7 +144,7 @@ services:
     environment:
       <<: *shared-env
       DASHBOARD_BIND: ${DASHBOARD_BIND:-0.0.0.0}
-      DASHBOARD_PORT: ${DASHBOARD_PORT:-8090}
+      DASHBOARD_PORT: ${DASHBOARD_PORT:-8089}
       BAG_WEB_USER: ${BAG_WEB_USER:-}
       BAG_WEB_PASS: ${BAG_WEB_PASS:-}
       ROSBAG_MANAGER_URL: ${ROSBAG_MANAGER_URL:-http://127.0.0.1:8086}

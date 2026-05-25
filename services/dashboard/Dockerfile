@@ -31,7 +31,7 @@ RUN pip3 install --no-cache-dir \
         opencv-python-headless==4.10.0.84
 
 ENV DASHBOARD_BIND=0.0.0.0
-ENV DASHBOARD_PORT=8090
+ENV DASHBOARD_PORT=8089
 ENV ROSBAG_MANAGER_URL=http://127.0.0.1:8086
 
 WORKDIR /app

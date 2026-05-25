@@ -26,7 +26,8 @@ atl4s-monorepo/
 ├── services/
 │   ├── sitl/               ArduPilot SITL + MAVProxy fan-out
 │   ├── mavros/             MAVLink ⇄ ROS 2 bridge
-│   └── foxglove/           ROS 2 topics → WebSocket on TCP 8765
+│   ├── foxglove/           ROS 2 topics → WebSocket on TCP 8765
+│   └── commander/          Autonomy node: telemetry in, MAVROS commands out
 ├── shared/                 (custom message packages, created on demand)
 ├── deploy/                 (Terraform, planned)
 └── scripts/
@@ -64,9 +65,9 @@ Open Foxglove Studio (`https://studio.foxglove.dev/`) → "Open connection" → 
 | `sitl` | running | ArduPilot SITL + MAVProxy. Only starts under `--profile sim`. |
 | `mavros` | running | MAVLink ⇄ ROS 2 bridge. Always on. |
 | `foxglove` | running | Browser-based visualization (`ros-humble-foxglove-bridge`, TCP 8765). |
+| `commander` | running | Autonomy node. v2 calls `/mavros/set_mode` RTL on low battery. |
 | `web-backend` | planned | FastAPI WebSocket service for the custom dashboard. |
 | `web-frontend` | planned | Browser dashboard. |
-| `commander` | planned | Subscribes to telemetry, publishes setpoints back to MAVROS. |
 | `bag-record` / `bag-replay` | planned | Offline development with recorded data. |
 | `perception-detector` | planned | Object detection on L4 GPU. |
 | `perception-segmenter` | planned | Segmentation. |

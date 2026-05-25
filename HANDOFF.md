@@ -88,11 +88,12 @@ atl4s-monorepo/
 
 ## Current status
 
-**Telemetry pipeline + Foxglove bridge are working.**
+**Telemetry pipeline + Foxglove bridge + commander are working.**
 
 - SITL container: stable, GPS lock, EKF converged.
 - MAVROS container: bound on `0.0.0.0:14550`, all plugins loaded, link to the autopilot established. `AUTOPILOT_VERSION` round-trip succeeds (proves the bidirectional path through MAVProxy).
 - Foxglove container: listening on `0.0.0.0:8765`, advertising ~140 channels for every `/mavros/*` topic plus the MAVROS services (arming, set_mode, param, etc.).
+- Commander container: subscribed to `/mavros/state` and `/mavros/battery`. Verified end-to-end by forcing a trip with `BATTERY_LOW_THRESHOLD=1.0` — commander called `/mavros/set_mode` RTL, MAVROS accepted (`mode_sent=True`), and `/mavros/state.mode` reflected `RTL`.
 - `/mavros/state` reports `connected: true`, current flight mode (`STABILIZE` at idle).
 - `/mavros/battery` reports voltage, percentage, and per-cell voltages.
 - `./scripts/topic-check.sh` should report OK for the four sentinel topics.
@@ -159,6 +160,7 @@ Both images use the ROS 2 default RMW (FastRTPS). Sufficient for single-host. Mu
 | 1 | `mavros` | running | MAVLink ⇄ ROS 2 bridge |
 | 2 | `sitl` | running | ArduPilot SITL + MAVProxy. Only under `--profile sim`. |
 | 3 | `foxglove` | running | `ros-humble-foxglove-bridge` on TCP 8765. Image includes `ros-humble-mavros-msgs` so Studio can call MAVROS services (arming, set_mode, params). Add the `-msgs` package of every new service that exposes services. |
+| 4 | `commander` | running | Autonomy node. Subscribes `/mavros/battery` and `/mavros/state` Best Effort; on low-battery latch calls `/mavros/set_mode` RTL. `BATTERY_LOW_THRESHOLD` env var configures the trip point (default 0.20). 5% hysteresis before clearing the latch. |
 | 4 | `web-backend` | planned | FastAPI WebSocket service. Subscribes to curated `/mavros/*` subset with Best Effort QoS. |
 | 5 | `web-frontend` | planned | Browser dashboard against `web-backend` |
 | 6 | `commander` | planned | Subscribes to telemetry, publishes setpoints. Requires bidirectional MAVProxy (see gotcha above). |
@@ -183,8 +185,8 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
 
 ## Open items
 
-1. **`commander` service** — start with a trivial behavior (e.g. "log a warning when battery < 20 %", then expand to "RTL when battery < 20 %"). Pattern: subscribe Best Effort, publish to `/mavros/setpoint_velocity/cmd_vel` or call `/mavros/cmd/arming` service.
-2. **`web-backend` + `web-frontend`** — FastAPI WebSocket service in `services/web-backend/`, plain HTML / JS or React in `services/web-frontend/`. Both behind nginx or directly exposed.
+1. **`web-backend` + `web-frontend`** — FastAPI WebSocket service in `services/web-backend/`, plain HTML / JS or React in `services/web-frontend/`. Both behind nginx or directly exposed.
+2. **More `commander` behaviors** — only the low-battery → RTL path exists today. Natural next additions: takeoff-on-command (call `/mavros/cmd/takeoff`), waypoint loops, geofence triggers, telemetry-driven event publishing to `/atl4s/events`.
 3. **Drone integration** — when the Orin is ready, set `FCU_URL=udp://:14550@` on the VM (already the value), have the Orin run MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 to the Orin's IP in the firewall. No downstream changes expected.
 4. **Security tightening** — replace `default-allow-ssh` with IAP-only SSH (`35.235.240.0/20`), move Foxglove / web traffic behind Tailscale or similar, add per-team-member IAM bindings. Defer until test phase is over.
 5. **GCS bucket region** — bucket is in us-east4; VM is in northamerica-northeast1. Functional but slightly slower transfers. Consider recreating in northamerica-northeast1 for production.

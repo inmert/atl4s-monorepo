@@ -124,9 +124,10 @@ No rebuild required (the config dir is bind-mounted).
 
 `backend/topics.py` runs an rclpy executor in a daemon thread and subscribes (Best-Effort QoS to match the publishers) to:
 
-- `BASE_TOPICS` — `/atl4s/health` only.
 - Every telemetry topic referenced by every entry in `config/robots.yaml` (resolved via the `TELEMETRY_TYPES` map: `state` → `mavros_msgs/State`, `battery` → `BatteryState`, `imu` → `Imu`, `gps` → `NavSatFix`). Cameras are handled by the camera bridge instead.
 - Any topic under `/perception/*` or `/fusion/*` once it appears on the bus (rescan every 5 s via `get_topic_names_and_types()` + dynamic `get_message()`).
+
+(`BASE_TOPICS` exists in the code as an extension hook for pipeline-wide topics and is currently empty — the retired `/atl4s/health` was the only entry until phase 4 folded healthcheck into the dashboard.)
 
 Callbacks update an in-memory snapshot and push deltas to per-client `asyncio.Queue`s via `run_coroutine_threadsafe`. The React side mounts `TopicProvider` once at the app root so the nav badge, Home, Robots, and Pipelines pages share a single WebSocket.
 
@@ -179,7 +180,7 @@ Security note: mounting `/var/run/docker.sock` gives the dashboard container roo
 `backend/ros.py` exposes two surfaces backed by the topic bridge's rclpy node:
 
 - `GET /api/ros/topics` walks the graph via `get_topic_names_and_types()` + `get_publishers/subscriptions_info_by_topic()`. Cheap (graph state is cached locally by the middleware). The dashboard frontend polls this every 5 s on the ROS page.
-- `WS /ws/ros/sample/{topic}` opens a per-socket queue routed off the topic bridge's `_on_message`. If the topic isn't already in the bridge's subscription set (i.e. not in the registry's telemetry mappings, not `/atl4s/health`, not a discovered `/perception/*` / `/fusion/*`), the type is resolved from the graph via `rosidl_runtime_py.utilities.get_message()` and a new Best-Effort subscription is created. Subscriptions are persistent — once sampled, the topic is kept subscribed even after the last client leaves. Memory grows once per topic, not per client.
+- `WS /ws/ros/sample/{topic}` opens a per-socket queue routed off the topic bridge's `_on_message`. If the topic isn't already in the bridge's subscription set (i.e. not in the registry's telemetry mappings, not a discovered `/perception/*` / `/fusion/*`), the type is resolved from the graph via `rosidl_runtime_py.utilities.get_message()` and a new Best-Effort subscription is created. Subscriptions are persistent — once sampled, the topic is kept subscribed even after the last client leaves. Memory grows once per topic, not per client.
 
 ## Inspecting
 

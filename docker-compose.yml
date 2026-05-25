@@ -114,6 +114,21 @@ services:
     depends_on:
       - mavros
 
+  bag-web:
+    # Non-ROS service (FastAPI + GCS), but keeping the x-common base for the
+    # restart policy + host networking. The fastdds_profiles bind-mount is
+    # harmless here; uses the GCE metadata server for GCS auth like uploader.
+    <<: *common
+    build:
+      context: ./services/bag-web
+    image: atl4s/bag-web:latest
+    container_name: atl4s-bag-web
+    environment:
+      GCS_BUCKET: ${GCS_BUCKET:-atl4s-rosbags}
+      BAG_WEB_PORT: ${BAG_WEB_PORT:-8089}
+      BAG_WEB_USER: ${BAG_WEB_USER:-}
+      BAG_WEB_PASS: ${BAG_WEB_PASS:-}
+
   bag-record:
     <<: *common
     build:

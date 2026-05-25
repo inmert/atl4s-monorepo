@@ -1,27 +1,33 @@
 import { NavLink, Route, Routes } from 'react-router-dom';
+import {
+  Activity,
+  Archive,
+  Bot,
+  Cpu,
+  Home as HomeIcon,
+  Share2,
+} from 'lucide-react';
 import { TopicProvider, useTopic } from './lib/topics';
 import { Home } from './pages/Home';
-import { Bags } from './pages/Bags';
+import { Robots } from './pages/Robots';
+import { Pipelines } from './pages/Pipelines';
+import { RosbagManager } from './pages/RosbagManager';
+import { Ros } from './pages/Ros';
+import { Health } from './pages/Health';
+// Legacy pages — still routable during the redesign so functionality isn't
+// lost while Robots / Rosbag Manager are filled out. Removed in later phases.
 import { Live } from './pages/Live';
 import { Map } from './pages/Map';
-import { Record } from './pages/Record';
-import { Replay } from './pages/Replay';
-import { Pipelines } from './pages/Pipelines';
-import { Health } from './pages/Health';
 
-const tabs = [
-  { to: '/', label: 'Home', end: true },
-  { to: '/live', label: 'Live' },
-  { to: '/map', label: 'Map' },
-  { to: '/bags', label: 'Bags' },
-  { to: '/record', label: 'Record' },
-  { to: '/replay', label: 'Replay' },
-  { to: '/pipelines', label: 'Pipelines' },
-  { to: '/health', label: 'Health' },
+const nav = [
+  { to: '/', label: 'Home', icon: HomeIcon, end: true },
+  { to: '/robots', label: 'Robots', icon: Bot },
+  { to: '/pipelines', label: 'Pipelines', icon: Cpu },
+  { to: '/rosbags', label: 'Rosbag Manager', icon: Archive },
+  { to: '/ros', label: 'ROS', icon: Share2 },
+  { to: '/health', label: 'Health', icon: Activity },
 ];
 
-// DiagnosticStatus.level is `byte` in ROS; message_to_ordereddict serializes
-// it as a single-character string, so we coerce via charCodeAt on the client.
 function levelNum(level: unknown): number {
   if (typeof level === 'number') return level;
   if (typeof level === 'string' && level.length > 0) return level.charCodeAt(0);
@@ -31,42 +37,67 @@ function levelNum(level: unknown): number {
 function HealthBadge() {
   const health = useTopic('/atl4s/health');
   if (!health) {
-    return <span className="health-badge dim" title="no /atl4s/health yet">● —</span>;
+    return (
+      <span className="health-badge dim" title="no /atl4s/health yet">
+        <span className="dot" /> idle
+      </span>
+    );
   }
   const statuses = (health.data?.status || []) as Array<{ level: unknown }>;
   const max = statuses.reduce((m, s) => Math.max(m, levelNum(s.level)), 0);
   const tone = max === 0 ? 'ok' : max === 1 ? 'warn' : 'err';
-  const label = max === 0 ? 'OK' : max === 1 ? 'WARN' : max === 3 ? 'STALE' : 'ERR';
-  return <span className={`health-badge ${tone}`} title={`health: ${label}`}>● {label}</span>;
+  const label = max === 0 ? 'Healthy' : max === 1 ? 'Warn' : max === 3 ? 'Stale' : 'Error';
+  return (
+    <span className={`health-badge ${tone}`} title={`health: ${label}`}>
+      <span className={`dot ${tone}`} /> {label}
+    </span>
+  );
+}
+
+function Sidebar() {
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-brand">
+        <span className="brand-dot">A</span>
+        <span>ATL4S</span>
+      </div>
+
+      {nav.map((item) => (
+        <NavLink
+          key={item.to}
+          to={item.to}
+          end={item.end}
+          className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
+        >
+          <item.icon className="icon" />
+          <span>{item.label}</span>
+        </NavLink>
+      ))}
+
+      <div className="sidebar-footer">
+        <HealthBadge />
+      </div>
+    </aside>
+  );
 }
 
 export function App() {
   return (
     <TopicProvider>
       <div className="app">
-        <header className="nav">
-          <div className="brand">ATL4S</div>
-          <nav>
-            {tabs.map((t) => (
-              <NavLink key={t.to} to={t.to} end={t.end}>
-                {t.label}
-              </NavLink>
-            ))}
-          </nav>
-          <div className="nav-right">
-            <HealthBadge />
-          </div>
-        </header>
-        <main>
+        <Sidebar />
+        <main className="main">
           <Routes>
             <Route path="/" element={<Home />} />
+            <Route path="/robots" element={<Robots />} />
+            <Route path="/robots/:id" element={<Robots />} />
+            <Route path="/pipelines" element={<Pipelines />} />
+            <Route path="/rosbags/*" element={<RosbagManager />} />
+            <Route path="/ros" element={<Ros />} />
+            <Route path="/health" element={<Health />} />
+            {/* Legacy: kept routable during the redesign, hidden from nav. */}
             <Route path="/live" element={<Live />} />
             <Route path="/map" element={<Map />} />
-            <Route path="/bags" element={<Bags />} />
-            <Route path="/record" element={<Record />} />
-            <Route path="/replay" element={<Replay />} />
-            <Route path="/pipelines" element={<Pipelines />} />
-            <Route path="/health" element={<Health />} />
           </Routes>
         </main>
       </div>

@@ -84,8 +84,7 @@ export function Record() {
 
   return (
     <section>
-      <div className="page-header">
-        <h1>Record</h1>
+      <div className="toolbar" style={{ justifyContent: 'flex-end', marginBottom: 12 }}>
         <button className="ghost" onClick={poll}>Refresh</button>
       </div>
 

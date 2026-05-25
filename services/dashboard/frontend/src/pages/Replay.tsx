@@ -71,8 +71,7 @@ export function Replay() {
 
   return (
     <section>
-      <div className="page-header">
-        <h1>Replay</h1>
+      <div className="toolbar" style={{ justifyContent: 'flex-end', marginBottom: 12 }}>
         <button className="ghost" onClick={() => { pollStatus(); refreshBags(); }}>Refresh</button>
       </div>
 

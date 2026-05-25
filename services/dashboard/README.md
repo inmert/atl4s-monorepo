@@ -19,7 +19,7 @@ Phased Apple-style redesign in progress. Phase 1 (sidebar shell + new IA + desig
 | `/rosbags/record` | Start/stop a recording (optional name / topics / duration), live status, local bag table with upload state + force-upload. |
 | `/rosbags/replay` | Bag dropdown, start/stop, status, Foxglove deep link. |
 | `/ros` | Full ROS topic graph from the rclpy node. Namespace-grouped cards with collapsible sections, type-aware filter, per-topic pub / sub counts. Click a row to open the inspector: per-endpoint node + QoS badge, plus a live sample drawer that opens `/ws/ros/sample/{topic}` and streams the latest message JSON with rate. |
-| `/health` | `DiagnosticArray` from `/atl4s/health` with per-topic level / message / key-value pairs. Nav badge reflects worst level. Phase 4: gains per-container Docker state via mounted `/var/run/docker.sock`. |
+| `/health` | Two cards. **Containers** — every `atl4s-*` container from the host Docker daemon (via mounted `/var/run/docker.sock:ro`) with state, health, uptime, restart count, derived level. **Topic liveness** — per-registry-telemetry-topic age + rate, level OK/IDLE/WARN/ERR. Aggregate badge in the page header and sidebar reflects the worst level (IDLE doesn't degrade — an offline robot in the registry isn't a fault). Combined snapshot at `GET /api/health`. |
 
 ## HTTP + WebSocket surfaces
 
@@ -29,6 +29,8 @@ Phased Apple-style redesign in progress. Phase 1 (sidebar shell + new IA + desig
 | `GET` | `/api/robots` | List robots from the registry (config + telemetry topic mapping). |
 | `GET` | `/api/robots/{id}` | One robot, or 404. |
 | `GET` | `/api/ros/topics` | Full topic graph from the rclpy node: every topic on the bus with its types, pub/sub counts, and per-endpoint node name + QoS. The dashboard's own subscriber is filtered out of the sub count. |
+| `GET` | `/api/containers` | Per-container state from the host Docker daemon (filtered to the `atl4s-` name prefix). `503` if the docker socket isn't mounted. |
+| `GET` | `/api/health` | Combined snapshot: containers + per-topic liveness + aggregate level + per-level counts. Polled by the nav badge / Home card / Health page every 5 s via a single `HealthProvider` context. |
 | `*` | `/api/*` | Streaming proxy to `rosbag-manager` (see [services/rosbag-manager/README.md](../rosbag-manager/README.md)). HTTP Basic at the edge. |
 | `WS` | `/ws/topics` | Push curated ROS topic snapshots + rates as JSON deltas. Initial snapshot on connect. |
 | `WS` | `/ws/camera/{robot_id}` | Push JPEG-encoded frames from the robot's camera topic as binary WebSocket messages. 4404 close if the robot has no camera configured. |
@@ -50,7 +52,9 @@ services/dashboard/
 │   ├── proxy.py           streaming /api/* → rosbag-manager
 │   ├── robots.py          registry loader + /api/robots router
 │   ├── ros.py             /api/ros/topics graph endpoint + /ws/ros/sample/{topic} handler
-│   ├── topics.py          rclpy thread → /ws/topics broadcast + per-topic sample queues; subs from registry + base + /perception/* /fusion/* discovery + ad-hoc samples
+│   ├── containers.py      docker SDK wrapper + /api/containers router (mounts /var/run/docker.sock:ro)
+│   ├── health.py          /api/health — combines containers.py + topic-bridge timestamps into one snapshot
+│   ├── topics.py          rclpy thread → /ws/topics broadcast + per-topic sample queues; subs from registry + /perception/* /fusion/* discovery + ad-hoc samples
 │   └── camera.py          rclpy thread → /ws/camera/{robot_id} JPEG fan-out (one subscription per unique camera topic)
 └── frontend/              React + Vite + TS (lucide-react icons)
     ├── package.json
@@ -65,6 +69,7 @@ services/dashboard/
         │   ├── api.ts       typed wrappers around /api/* + /api/robots
         │   ├── ws.ts        WebSocket helper with reconnect/backoff
         │   ├── topics.tsx   TopicProvider context (single /ws/topics)
+        │   ├── health.tsx   HealthProvider context (polls /api/health every 5s)
         │   ├── robots.ts    iconFor + isOnline / isFresh / summarize helpers
         │   ├── format.ts    bytes / dates
         │   ├── foxglove.ts  deep-link builder
@@ -83,6 +88,7 @@ services/dashboard/
 | `BAG_WEB_PASS` | (unset) | HTTP Basic password. Both must be set or both unset (auth disabled — only safe behind a closed firewall). |
 | `ROSBAG_MANAGER_URL` | `http://127.0.0.1:8086` | Where the proxy layer forwards bag-plane requests. |
 | `ROBOTS_CONFIG` | `/app/config/robots.yaml` | Path to the robot registry YAML (bind-mounted from `services/dashboard/config/` in compose). |
+| `CONTAINERS_NAME_PREFIX` | `atl4s-` | Substring filter applied to container names when listing for the Health page. Set to empty to surface every container on the host. |
 
 ## Robot registry
 
@@ -124,6 +130,16 @@ Callbacks update an in-memory snapshot and push deltas to per-client `asyncio.Qu
 ## Camera bridge
 
 `backend/camera.py` opens one `sensor_msgs/Image` subscription per unique `telemetry.camera` topic across the registry, re-encodes each frame to JPEG (quality 70) with OpenCV, and fans out to clients via `/ws/camera/{robot_id}`. The endpoint resolves the robot's camera topic from the registry; a `4404` close means no camera is configured for that robot.
+
+## Health (containers + topics)
+
+The dashboard owns health end-to-end — no separate service.
+
+- **Containers** (`backend/containers.py`): `docker.from_env()` talks to the daemon over the bind-mounted `/var/run/docker.sock:ro`. Each `atl4s-*` container's state, health, uptime, restart count, and image are surfaced; severity level is derived from container state (running → ok; restarting/paused → warn; exited/dead → err) and overridden by the container's own health check status if present. `connect()` is called at lifespan startup so a missing socket fails loud.
+- **Topic liveness** (`backend/health.py`): per-registry-telemetry-topic, computed off `topics.bridge._timestamps` (no extra ROS subs). Per-key default thresholds match the retired healthcheck service: `state` 5 s, `battery` 5 s, `imu` 3 s, `gps` 10 s, `camera` 5 s. A topic that has never published reports level `idle` rather than `warn` so an offline robot in the registry doesn't degrade the badge. `state` carrying `connected: false` is treated as `warn`.
+- **Aggregate**: `level = max(container_levels ∪ topic_levels)` where `idle` is treated as `ok`.
+
+Security note: mounting `/var/run/docker.sock` gives the dashboard container root-equivalent power over the host. Read-only is enough for inspection but the docker daemon doesn't enforce that, so this is acceptable behind HTTP Basic + closed firewall today; flagged for the future security-tightening pass.
 
 ## ROS graph + sampling
 

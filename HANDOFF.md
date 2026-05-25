@@ -57,7 +57,6 @@ atl4s-monorepo/
 │   ├── mavros/               MAVLink ⇄ ROS 2 bridge
 │   ├── foxglove/             ROS 2 topics → WebSocket on TCP 8765
 │   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
-│   ├── healthcheck/          Topic-liveness monitor; stdout + HTTP /health + /atl4s/health
 │   ├── dashboard/            Operator UI: home, robots, pipelines, rosbags, ROS, health (HTTP Basic, TCP 8089)
 │   │   └── config/           robot registry (`robots.yaml`, bind-mounted)
 │   └── rosbag-manager/       HTTP API for bag-plane ops: record / upload / GCS browser / replay (loopback 127.0.0.1:8086)
@@ -102,9 +101,8 @@ atl4s-monorepo/
 - gz-bridge: `/camera/image` (640×480 @ 5 Hz), `/camera/camera_info`, `/imu/gazebo` (~600 Hz), `/clock` (~600 Hz) flowing as ROS 2 topics.
 - Foxglove: WebSocket on `0.0.0.0:8765`. BE whitelist covers `/imu/gazebo`, `/clock`, `/mavros/.*`, `/uas1/.*` (raw MAVLink dropped silently without the last one).
 - Commander: low-battery → `set_mode RTL` verified end-to-end (forced via `BATTERY_LOW_THRESHOLD=1.0`).
-- Healthcheck: tracks 7 topics, reports stdout summary every 5 s, HTTP `GET /health` on `:8088` (200/503), publishes `/atl4s/health` (DiagnosticArray) for Foxglove.
 - rosbag-manager: HTTP API on `127.0.0.1:8086` for record / upload / GCS browser / replay. Smoke tested end-to-end via `./scripts/bag-record.sh` — record subprocess + watcher upload + GCS confirmed; replay downloads from GCS, plays, and cleans up `${REPLAY_DIR}`.
-- dashboard: operator UI on `:8089` with HTTP Basic via `BAG_WEB_USER` / `BAG_WEB_PASS`. Phased Apple-style redesign in progress (see Open items). Current pages: **Home** (overview tiles — robots, health, pipelines, recent bags), **Robots** (YAML-driven registry; clicking a robot shows per-robot telemetry strip, Leaflet map scoped to its GPS topic, JPEG camera viewport, and a topics table — Gazebo Drone live today, Orin Drone registered offline), **Pipelines** (today auto-discovers `/perception/*` and `/fusion/*`; becomes a perception-service config + on/off surface in phase 6), **Rosbag Manager** (segmented sub-nav at `/rosbags`, `/rosbags/record`, `/rosbags/replay` wrapping the existing bag pages — full visual merge in phase 5), **ROS** (full topic graph from the rclpy node — every topic on the bus with type, pub/sub counts, per-endpoint QoS, and click-to-inspect that opens a transient sample WebSocket on `/ws/ros/sample/{topic}`), **Health** (DiagnosticArray from `/atl4s/health` + nav badge — gains per-container Docker state in phase 4). All `/api/*` calls stream-proxy to `rosbag-manager`; `/ws/topics`, `/ws/camera/{robot_id}`, and `/ws/ros/sample/{topic}` bridge rclpy subscribers from a daemon thread. Adding a robot is a `services/dashboard/config/robots.yaml` edit + `docker compose restart dashboard`. Foxglove Studio deep link on Home, Robots detail, Replay.
+- dashboard: operator UI on `:8089` with HTTP Basic via `BAG_WEB_USER` / `BAG_WEB_PASS`. Phased Apple-style redesign in progress (see Open items). Current pages: **Home** (overview tiles — robots, health, pipelines, recent bags), **Robots** (YAML-driven registry; clicking a robot shows per-robot telemetry strip, Leaflet map scoped to its GPS topic, JPEG camera viewport, and a topics table — Gazebo Drone live today, Orin Drone registered offline), **Pipelines** (today auto-discovers `/perception/*` and `/fusion/*`; becomes a perception-service config + on/off surface in phase 6), **Rosbag Manager** (segmented sub-nav at `/rosbags`, `/rosbags/record`, `/rosbags/replay` wrapping the existing bag pages — full visual merge in phase 5), **ROS** (full topic graph from the rclpy node — every topic on the bus with type, pub/sub counts, per-endpoint QoS, and click-to-inspect that opens a transient sample WebSocket on `/ws/ros/sample/{topic}`), **Health** (per-container state from the host Docker daemon via mounted `/var/run/docker.sock:ro` + per-topic liveness computed from the dashboard's own topic-bridge timestamps; combined aggregate drives the sidebar badge). All `/api/*` calls stream-proxy to `rosbag-manager`; `/ws/topics`, `/ws/camera/{robot_id}`, and `/ws/ros/sample/{topic}` bridge rclpy subscribers from a daemon thread. Adding a robot is a `services/dashboard/config/robots.yaml` edit + `docker compose restart dashboard`. Foxglove Studio deep link on Home, Robots detail, Replay.
 
 Verify:
 
@@ -114,8 +112,8 @@ docker exec atl4s-mavros bash -c \
   "source /opt/ros/humble/setup.bash && \
    ros2 topic echo /mavros/state --qos-reliability best_effort --once"
 
-# Pipeline liveness
-curl -sS localhost:8088/health | jq .status        # OK if all required topics fresh
+# Pipeline liveness (containers + topics, computed by the dashboard)
+curl -sS -u "${BAG_WEB_USER}:${BAG_WEB_PASS}" localhost:8089/api/health | jq .level
 
 # dashboard (auth from .env)
 curl -sS -u "${BAG_WEB_USER}:${BAG_WEB_PASS}" localhost:8089/api/bags | jq
@@ -210,16 +208,15 @@ The topic bridge (`services/dashboard/backend/topics.py`) calls `node.get_topic_
 | 4 | `mavros` | running | always | MAVLink ⇄ ROS 2 bridge via `apm.launch`. |
 | 5 | `foxglove` | running | always | `foxglove_bridge 3.3.0` on TCP 8765. BE whitelist in `params.yaml`; `mavros_msgs` installed so Studio can call MAVROS services. Add the `-msgs` package of every new service that exposes services. |
 | 6 | `commander` | running | always | Autonomy. Low-battery latch → `/mavros/set_mode RTL`. Threshold via `BATTERY_LOW_THRESHOLD`. |
-| 7 | `healthcheck` | running | always | Topic-liveness monitor. Stdout summary + HTTP `/health` on 8088 + `/atl4s/health` (DiagnosticArray). |
-| 8 | `rosbag-manager` | running | always | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser (list / upload / download / delete), and replay via `ros2 bag play`. Binds `127.0.0.1:8086` (loopback only). `FROM ros:humble`. Consumed by `dashboard`, `scripts/bag-record.sh`, and any future caller on the host. |
-| 9 | `dashboard` | running | always | Single human-facing surface on TCP 8089 with HTTP Basic (`BAG_WEB_USER` / `BAG_WEB_PASS`). Streaming proxy to `rosbag-manager` under `/api/*`; `/ws/topics` + per-robot `/ws/camera/{robot_id}` + per-topic `/ws/ros/sample/{topic}` rclpy bridges in a daemon thread. Phased redesign in progress (shells + IA in phase 1; robot registry + per-robot detail in phase 2; full topic graph + on-demand sampling in phase 3). Tabs: **Home** (overview), **Robots** (YAML registry — `/services/dashboard/config/robots.yaml`; per-robot telemetry / Leaflet map / camera / topics table), **Pipelines** (auto-discovers `/perception/*` + `/fusion/*` today; service config in phase 6), **Rosbag Manager** (wraps Bags/Record/Replay at `/rosbags`, `/rosbags/record`, `/rosbags/replay`), **ROS** (full topic graph via `GET /api/ros/topics` + click-to-inspect sample drawer), **Health** (DiagnosticArray; container state in phase 4). React + Vite + TS frontend (lucide-react icons, design-token CSS); FastAPI + rclpy backend in one image. |
-| 10 | `perception-detector` | planned | — | YOLO on `/camera/image`, L4 GPU. First use of `shared/atl4s_msgs/`. |
-| 11 | `perception-segmenter` | planned | — | Segmentation. |
-| 12 | `perception-fault` | planned | — | Fault / anomaly detection. |
-| 13 | `perception-lidar` | planned | — | Point-cloud processing, once a lidar source exists (Gazebo gpu_lidar back-pressures the FDM loop — see Open items). |
-| 14 | `fusion` | planned | — | Combines perception + pose into tracks / events. |
-| 15 | `event-publisher` | planned | — | Application events → GCP Pub/Sub. |
-| 16 | `ingestion` | planned | — | Zenoh bridge for ROS topics over WAN from the Orin (last). |
+| 7 | `rosbag-manager` | running | always | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser (list / upload / download / delete), and replay via `ros2 bag play`. Binds `127.0.0.1:8086` (loopback only). `FROM ros:humble`. Consumed by `dashboard`, `scripts/bag-record.sh`, and any future caller on the host. |
+| 8 | `dashboard` | running | always | Single human-facing surface on TCP 8089 with HTTP Basic (`BAG_WEB_USER` / `BAG_WEB_PASS`). Streaming proxy to `rosbag-manager` under `/api/*`; `/ws/topics` + per-robot `/ws/camera/{robot_id}` + per-topic `/ws/ros/sample/{topic}` rclpy bridges in a daemon thread. Also owns the formerly-standalone healthcheck role: combines per-container state (via mounted `/var/run/docker.sock:ro`) + per-topic liveness (from the topic-bridge's own timestamps) into `GET /api/health`. Phased redesign in progress (shells + IA in phase 1; robot registry + per-robot detail in phase 2; full topic graph + on-demand sampling in phase 3; container + topic health, healthcheck service retired, in phase 4). Tabs: **Home** (overview), **Robots** (YAML registry — `/services/dashboard/config/robots.yaml`), **Pipelines** (auto-discovers `/perception/*` + `/fusion/*` today; service config in phase 6), **Rosbag Manager**, **ROS** (full topic graph + click-to-inspect), **Health** (containers + topic liveness). React + Vite + TS frontend (lucide-react icons, design-token CSS); FastAPI + rclpy backend in one image. |
+| 9 | `perception-detector` | planned | — | YOLO on `/camera/image`, L4 GPU. First use of `shared/atl4s_msgs/`. |
+| 10 | `perception-segmenter` | planned | — | Segmentation. |
+| 11 | `perception-fault` | planned | — | Fault / anomaly detection. |
+| 12 | `perception-lidar` | planned | — | Point-cloud processing, once a lidar source exists (Gazebo gpu_lidar back-pressures the FDM loop — see Open items). |
+| 13 | `fusion` | planned | — | Combines perception + pose into tracks / events. |
+| 14 | `event-publisher` | planned | — | Application events → GCP Pub/Sub. |
+| 15 | `ingestion` | planned | — | Zenoh bridge for ROS topics over WAN from the Orin (last). |
 
 ## Topic contracts
 
@@ -232,7 +229,7 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
 
 ## Open items
 
-1. **Dashboard redesign (in progress).** Apple-style sidebar shell + new IA (Home / Robots / Pipelines / Rosbag Manager / ROS / Health) shipped in phase 1 (`c951cd9`). Robot registry (YAML-driven) + per-robot telemetry / Leaflet map / JPEG camera / topic table shipped in phase 2 (`43f3533`); legacy `/live` and `/map` deleted. Full ROS topic graph + on-demand sample inspector shipped in phase 3 (`5bc8d2a`). Remaining phases: (4) per-container health via mounted `/var/run/docker.sock`; (5) visual merge of Bags/Record/Replay into one Rosbag Manager surface; (6) Pipelines becomes a service config + on/off toggle UI (no GCS/training); (7) Home wired to phase-4–6 APIs.
+1. **Dashboard redesign (in progress).** Apple-style sidebar shell + new IA (Home / Robots / Pipelines / Rosbag Manager / ROS / Health) shipped in phase 1 (`c951cd9`). Robot registry (YAML-driven) + per-robot telemetry / Leaflet map / JPEG camera / topic table shipped in phase 2 (`43f3533`); legacy `/live` and `/map` deleted. Full ROS topic graph + on-demand sample inspector shipped in phase 3 (`5bc8d2a`). Per-container + per-topic health and retirement of the standalone `healthcheck` service shipped in phase 4 (`0609de3`). Remaining phases: (5) visual merge of Bags/Record/Replay into one Rosbag Manager surface; (6) Pipelines becomes a service config + on/off toggle UI (no GCS/training); (7) Home wired to phase-5–6 APIs.
 2. **First perception service — `perception-lidar` (next).** Stand up `shared/atl4s_msgs/` for lidar Detection types, then `services/perception-lidar` to process lidar scans for aircraft / tank classes. First use of the L4 GPU for inference. Configured + toggled from the dashboard Pipelines page once phase 6 lands.
 3. **More `commander` behaviors** — takeoff command, waypoint loop, geofence triggers, event publishing to `/atl4s/events`. Pure ROS 2 work, no new infrastructure.
 4. **Drone integration (Orin Nano)** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. Orin-side recording + upload calls `rosbag-manager`'s API to push real RealSense + lidar bags to GCS. Zenoh bridge for ROS topics over WAN comes at the end (`ingestion` service). The Orin Drone is already a first-class entry in the dashboard robot registry (offline until integration).

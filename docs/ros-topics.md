@@ -35,13 +35,9 @@ MAVROS publishes ~140 topics under `/mavros/*`. Most that aren't listed have no 
 
 Renames are configured in [services/gz-bridge/bridge.yaml](../services/gz-bridge/bridge.yaml). Gazebo-side topic paths include the world name; the ROS-side names stay constant.
 
-## Health (healthcheck)
+## Health
 
-| Topic | Type | Direction | Description |
-|---|---|---|---|
-| `/atl4s/health` | `diagnostic_msgs/DiagnosticArray` | out | Per-tracked-topic freshness (OK/WARN/ERROR) at 0.2 Hz |
-
-Also surfaced as HTTP `GET /health` on TCP 8088 (`200` if all required topics fresh, `503` otherwise).
+There is no dedicated health topic. The dashboard owns health: per-container state via the bind-mounted `/var/run/docker.sock:ro` and per-topic liveness computed from its own topic-bridge timestamps, combined into `GET /api/health` (HTTP Basic). The standalone `services/healthcheck` and its `/atl4s/health` `DiagnosticArray` publisher were retired in phase 4 of the dashboard redesign.
 
 ## Perception (planned)
 
@@ -61,14 +57,13 @@ Also surfaced as HTTP `GET /health` on TCP 8088 (`200` if all required topics fr
 
 ## Dashboard
 
-The `dashboard` service is a sink — it subscribes to the curated set below and publishes nothing of its own. Subscribers are recreated dynamically when new matching topics appear (5 s rescan window).
+The `dashboard` service is a sink — it subscribes and publishes nothing of its own. Subscriptions come from three sources:
 
-| Topic / pattern | Use |
+| Source | Topics |
 |---|---|
-| `/mavros/state`, `/mavros/battery`, `/mavros/imu/data`, `/mavros/global_position/global` | Live telemetry strip + map |
-| `/camera/image` | Camera viewport (re-encoded to JPEG; published via `/ws/camera`) |
-| `/atl4s/health` | Health page + aggregate nav badge |
-| `/perception/*`, `/fusion/*` (any type resolvable via `get_message()`) | Pipelines page — auto-discovered as those topics come online |
+| Robot registry (`services/dashboard/config/robots.yaml`) | Per-robot `state` / `battery` / `imu` / `gps` (telemetry mapping) and `camera` (JPEG fan-out on `/ws/camera/{robot_id}`). Adding a robot to the YAML auto-subscribes its topics on the next dashboard restart. |
+| Dynamic discovery (5 s rescan) | Any topic under `/perception/*` or `/fusion/*` whose type can be resolved via `rosidl_runtime_py.utilities.get_message()`. Pipelines page. |
+| On-demand sampling | Anything else the user clicks on in the ROS page. The first sample of an unsubscribed topic creates a Best-Effort subscription that's kept open for the process lifetime. |
 
 ## rosbag-manager
 

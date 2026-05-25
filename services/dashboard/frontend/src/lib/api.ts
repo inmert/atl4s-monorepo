@@ -18,6 +18,48 @@ export type Robot = {
   }>;
 };
 
+export type PipelineFieldType =
+  | 'string'
+  | 'number'
+  | 'slider'
+  | 'boolean'
+  | 'select'
+  | 'list_string';
+
+export type PipelineField = {
+  name: string;
+  label: string;
+  type: PipelineFieldType;
+  default: unknown;
+  options?: (string | number)[];
+  min?: number;
+  max?: number;
+  step?: number;
+};
+
+export type PipelineStatus = {
+  state: string;
+  level: HealthLevel;
+  message: string;
+};
+
+export type Pipeline = {
+  id: string;
+  name: string;
+  description: string;
+  kind: string;
+  icon: string;
+  container: string;
+  input_topics: string[];
+  output_topics: string[];
+  config_schema: PipelineField[];
+  status: PipelineStatus;
+};
+
+export type PipelineDetail = Pipeline & {
+  config: Record<string, unknown>;
+};
+
 export type RosEndpoint = { node: string; qos: string };
 
 // "idle" = registered but never seen (e.g. an offline robot in the registry).
@@ -142,6 +184,35 @@ export const api = {
   // Robots
   listRobots: () => request<Robot[]>('/api/robots'),
   getRobot: (id: string) => request<Robot>(`/api/robots/${encodeURIComponent(id)}`),
+
+  // Pipelines
+  listPipelines: () => request<Pipeline[]>('/api/pipelines'),
+  getPipeline: (id: string) =>
+    request<PipelineDetail>(`/api/pipelines/${encodeURIComponent(id)}`),
+  setPipelineConfig: (id: string, values: Record<string, unknown>) =>
+    request<{ config: Record<string, unknown> }>(
+      `/api/pipelines/${encodeURIComponent(id)}/config`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(values),
+      },
+    ),
+  startPipeline: (id: string) =>
+    request<PipelineStatus>(
+      `/api/pipelines/${encodeURIComponent(id)}/start`,
+      { method: 'POST' },
+    ),
+  stopPipeline: (id: string) =>
+    request<PipelineStatus>(
+      `/api/pipelines/${encodeURIComponent(id)}/stop`,
+      { method: 'POST' },
+    ),
+  restartPipeline: (id: string) =>
+    request<PipelineStatus>(
+      `/api/pipelines/${encodeURIComponent(id)}/restart`,
+      { method: 'POST' },
+    ),
 
   // ROS topic graph
   listRosTopics: () => request<RosTopic[]>('/api/ros/topics'),

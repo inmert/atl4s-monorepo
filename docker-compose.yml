@@ -137,14 +137,16 @@ services:
       ROSBAG_MANAGER_URL: ${ROSBAG_MANAGER_URL:-http://127.0.0.1:8086}
       ROBOTS_CONFIG: /app/config/robots.yaml
     # YAML <<: merge does not deep-merge lists; re-declare the x-common
-    # fastdds mount alongside the robot-registry bind so edits to
-    # robots.yaml are picked up by `docker compose restart dashboard`.
-    # docker.sock is mounted read-only for per-container health (Health
-    # page + nav badge); this gives the dashboard container root-equivalent
-    # power over the host — acceptable behind HTTP Basic + closed firewall.
+    # fastdds mount alongside the dashboard's own binds. The config dir is
+    # mounted read-write so the dashboard can persist per-pipeline runtime
+    # configs (config/pipelines/{id}.yaml) when the user clicks Save in the
+    # Pipelines form. docker.sock is mounted read-only for per-container
+    # health (Health page + nav badge); this gives the dashboard container
+    # root-equivalent power over the host — acceptable behind HTTP Basic +
+    # closed firewall.
     volumes:
       - ./shared/fastdds_profiles.xml:/fastdds_profiles.xml:ro
-      - ./services/dashboard/config:/app/config:ro
+      - ./services/dashboard/config:/app/config
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - rosbag-manager

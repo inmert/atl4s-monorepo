@@ -1,0 +1,8 @@
+model_variant: pointpillars
+confidence_threshold: 0.5
+target_classes:
+- aircraft
+- tank
+input_topic: /lidar/points
+output_topic: /perception/lidar/detections
+enable_tracking: false

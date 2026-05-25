@@ -19,6 +19,7 @@ from backend.camera import camera
 from backend.config import STATIC_DIR
 from backend.containers import inspector as docker_inspector, router as containers_router
 from backend.health import router as health_router
+from backend.pipelines import registry as pipelines_registry, router as pipelines_router
 from backend.robots import camera_topics, registry, router as robots_router
 from backend.ros import router as ros_router, sample_socket
 from backend.topics import bridge, topics_from_registry
@@ -31,6 +32,7 @@ log = logging.getLogger('dashboard.main')
 async def lifespan(app: FastAPI):
     loop = asyncio.get_running_loop()
     robots = registry.load()
+    pipelines_registry.load()
     docker_inspector.connect()
     rclpy.init()
     bridge.set_loop(loop)
@@ -61,6 +63,7 @@ app.include_router(robots_router)
 app.include_router(ros_router)
 app.include_router(containers_router)
 app.include_router(health_router)
+app.include_router(pipelines_router)
 app.include_router(proxy.router)
 
 

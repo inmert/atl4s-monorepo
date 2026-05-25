@@ -25,7 +25,8 @@ atl4s-monorepo/
 │   └── ros-topics.md
 ├── services/
 │   ├── sitl/               ArduPilot SITL + MAVProxy fan-out
-│   └── mavros/             MAVLink ⇄ ROS 2 bridge
+│   ├── mavros/             MAVLink ⇄ ROS 2 bridge
+│   └── foxglove/           ROS 2 topics → WebSocket on TCP 8765
 ├── shared/                 (custom message packages, created on demand)
 ├── deploy/                 (Terraform, planned)
 └── scripts/
@@ -54,13 +55,15 @@ docker exec atl4s-mavros bash -c \
 
 Expect `connected: true`. See [HANDOFF.md](HANDOFF.md) for the working context and current open items.
 
+Open Foxglove Studio (`https://studio.foxglove.dev/`) → "Open connection" → "Foxglove WebSocket" → `ws://<VM_external_IP>:8765` to inspect `/mavros/*` live in a browser.
+
 ## Services
 
 | Service | Status | Purpose |
 |---|---|---|
 | `sitl` | running | ArduPilot SITL + MAVProxy. Only starts under `--profile sim`. |
 | `mavros` | running | MAVLink ⇄ ROS 2 bridge. Always on. |
-| `foxglove` | planned | Browser-based visualization (`ros-humble-foxglove-bridge`, TCP 8765). |
+| `foxglove` | running | Browser-based visualization (`ros-humble-foxglove-bridge`, TCP 8765). |
 | `web-backend` | planned | FastAPI WebSocket service for the custom dashboard. |
 | `web-frontend` | planned | Browser dashboard. |
 | `commander` | planned | Subscribes to telemetry, publishes setpoints back to MAVROS. |

@@ -40,3 +40,15 @@ services:
       <<: *shared-env
       FCU_URL: ${FCU_URL:-udp://:14550@}
       GCS_URL: ${GCS_URL:-}
+
+  foxglove:
+    <<: *common
+    build:
+      context: ./services/foxglove
+    image: atl4s/foxglove:latest
+    container_name: atl4s-foxglove
+    environment:
+      <<: *shared-env
+      FOXGLOVE_PORT: ${FOXGLOVE_PORT:-8765}
+    depends_on:
+      - mavros

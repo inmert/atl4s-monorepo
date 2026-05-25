@@ -139,6 +139,7 @@ services:
       GCS_BUCKET: ${GCS_BUCKET:-atl4s-rosbags}
       ROSBAG_MANAGER_BIND: ${ROSBAG_MANAGER_BIND:-127.0.0.1}
       ROSBAG_MANAGER_PORT: ${ROSBAG_MANAGER_PORT:-8086}
+      RECORD_TOPICS: ${RECORD_TOPICS:-/mavros/state /mavros/battery /mavros/global_position/global /mavros/imu/data /camera/image /camera/camera_info /imu/gazebo /clock}
     volumes:
       - ./shared/fastdds_profiles.xml:/fastdds_profiles.xml:ro
       - ./data/bags:/data/bags

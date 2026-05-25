@@ -8,11 +8,16 @@ Consumed by `dashboard`, by `scripts/bag-record.sh`, and by any future caller ru
 
 ## Endpoints
 
-Scaffold ships `/healthz` only. Record, upload, GCS browser, and replay land in subsequent commits (see HANDOFF open item 3).
+Upload, GCS browser, and replay land in subsequent commits (see HANDOFF open item 3).
 
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/healthz` | Liveness; reports `BAG_DIR` and `GCS_BUCKET`. |
+| `POST` | `/api/record/start` | Body `{name?, topics?, duration?}`. Spawns `ros2 bag record` to `${BAG_DIR}/<name>/`. 409 if already recording. `duration` (seconds) auto-stops in the background. |
+| `POST` | `/api/record/stop` | SIGTERM the current recording; closes the bag cleanly. 409 if idle. |
+| `GET` | `/api/record/status` | `{state, name, topics, output, started_at}` with `state ∈ {idle, recording, stopping}`. |
+
+A per-recording QoS overrides file at `/tmp/qos-<name>.yaml` forces Best Effort on every topic — required for `/mavros/*`, which `ros2 bag record` otherwise misses silently.
 
 ## Configuration
 

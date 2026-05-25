@@ -1,21 +1,18 @@
 # gazebo
 
-Gazebo Harmonic running headless on the L4 GPU. Provides a 3D world and the [ArduPilot SITL plugin](https://github.com/ArduPilot/ardupilot_gazebo) — the bridge that lets an external ArduCopter binary fly inside the sim.
-
-This is **B.1** of the perception roadmap. In **B.2** the `sitl` container will be rewired to connect to this Gazebo via the SITL plugin ports, and a `gz-bridge` container will republish Gazebo sensor topics into ROS 2.
+Gazebo Harmonic running headless on the L4 GPU. Provides a 3D world and the [ArduPilot SITL plugin](https://github.com/ArduPilot/ardupilot_gazebo) — the bridge that lets the external ArduCopter binary in `services/sitl` fly inside the sim. Sensor topics emitted here are renamed by `services/gz-bridge` for downstream consumers.
 
 ## Configuration
 
 | Env | Default | Description |
 |---|---|---|
-| `GZ_WORLD` | `iris_runway.sdf` | World file to load. Upstream worlds (`iris_runway.sdf`, `iris_maze.sdf`, …) ship in `/ardupilot_gazebo/worlds/`. Custom worlds in `/atl4s/worlds/` (currently `atl4s.sdf`). |
+| `GZ_WORLD` | `iris_runway.sdf` | World file to load. Upstream worlds (`iris_runway.sdf`, `iris_maze.sdf`, …) ship in `/ardupilot_gazebo/worlds/`. |
 
 ## Worlds
 
 | World | Source | Notes |
 |---|---|---|
-| `iris_runway.sdf` | upstream | Bare iris on a runway. Used as the B.1 smoke world — proves the plugin loads. |
-| `atl4s.sdf` | this repo (`world/atl4s.sdf`) | Iris in a small obstacle course (ground, two boxes, a wall). Will gain camera + lidar sensors in B.2. |
+| `iris_runway.sdf` | upstream | Bare iris on a runway. Current default; what the pipeline is verified against. |
 
 ## GPU and rendering
 
@@ -28,14 +25,14 @@ docker exec atl4s-gazebo nvidia-smi
 ## Inspecting from inside the container
 
 ```bash
-docker exec atl4s-gazebo bash -c 'gz topic -l'           # all Gazebo topics
-docker exec atl4s-gazebo bash -c 'gz model --list'       # spawned models
-docker exec atl4s-gazebo bash -c 'gz sim -v'             # version
+docker exec atl4s-gazebo bash -c 'gz topic -l'        # all Gazebo topics
+docker exec atl4s-gazebo bash -c 'gz model --list'    # spawned models
+docker exec atl4s-gazebo bash -c 'gz sim -v'          # version
 ```
 
 ## Activation
 
-Under the `sim` profile alongside `sitl`:
+Under the `sim` profile alongside `sitl` and `gz-bridge`:
 
 ```bash
 docker compose --profile sim up -d gazebo

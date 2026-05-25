@@ -21,6 +21,16 @@
 
 The image installs `ros-humble-mavros-msgs` so the bridge can expose `/mavros/*` services to Studio. Add the `-msgs` package of every new ATL4S service that exposes services.
 
+## QoS whitelist
+
+`foxglove_bridge` subscribes Reliable + Volatile by default. BE publishers don't match a Reliable sub and get dropped silently. The current entries in [params.yaml](params.yaml) `best_effort_qos_topic_whitelist`:
+
+- `/imu/gazebo`, `/clock` — high-rate gz-bridge topics
+- `/mavros/.*` — most MAVROS publishers are BE
+- `/uas1/.*` — raw MAVLink streams from MAVROS
+
+Add new BE namespaces here when standing up new services. TRANSIENT_LOCAL latched topics (`/tf_static`, `/mavros/home_position/home`, …) are handled automatically by `foxglove_bridge 3.x` durability matching.
+
 ## Connecting
 
 In Foxglove Studio: Open connection → Foxglove WebSocket → `ws://<VM_external_IP>:8765`.

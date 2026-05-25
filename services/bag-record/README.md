@@ -6,7 +6,7 @@ Records selected ROS 2 topics to an mcap bag under `/data/bags/<name>/`.
 
 | Env | Default | Description |
 |---|---|---|
-| `RECORD_TOPICS` | `/mavros/state /mavros/battery /mavros/global_position/global /mavros/imu/data` | Space-separated topic list passed to `ros2 bag record`. |
+| `RECORD_TOPICS` | `/mavros/state /mavros/battery /mavros/global_position/global /mavros/imu/data /camera/image /camera/camera_info /imu/gazebo /clock` | Space-separated topic list passed to `ros2 bag record`. |
 | `BAG_NAME` | `atl4s-<UTC timestamp>` | Bag directory name under `BAG_DIR`. |
 | `BAG_DIR` | `/data/bags` | Where the bag is written (bind-mounted from `./data/bags` on the host). |
 
@@ -26,4 +26,4 @@ The `uploader` service watches the same directory and pushes completed bags to G
 
 ## QoS
 
-`/mavros/*` topics are Best Effort. `ros2 bag record` defaults to Reliable, which would silently miss messages. `--qos-profile-overrides-path /dev/null` falls back to matching the publisher's offered QoS — this matters and should not be removed.
+`ros2 bag record` defaults its subscribers to Reliable, which silently misses every message from Best Effort publishers like `/mavros/*`. The entrypoint generates a per-topic Best Effort YAML at `/tmp/qos-overrides.yaml` and passes it via `--qos-profile-overrides-path`. Humble's parser accepts `topic: <dict>` and crashes on the more common `topic: [<dict>]` list form — the generated file uses the dict shape on purpose.

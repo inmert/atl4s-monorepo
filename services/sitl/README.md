@@ -31,11 +31,14 @@ The container `depends_on: gazebo` so Gazebo comes up first. If `atl4s-gazebo` i
 | `SITL_HOME_ALT` | `5` | Home altitude (m) |
 | `SITL_HOME_HEADING` | `0` | Home heading (deg) |
 | `SITL_SPEEDUP` | `1` | (Unused with `--model JSON`; Gazebo's `real_time_factor` controls sim time.) |
-| `MAVPROXY_OUT` | `udp:127.0.0.1:14550` | MAVProxy `--out` target |
+| `MAVPROXY_OUT` | `udp:127.0.0.1:14550` | MAVProxy `--out` target. `udp:` is bidirectional (commands round-trip); `udpout:` is send-only. |
+| `MAVPROXY_STREAMRATE` | `10` | MAVProxy `--streamrate`. Rate (Hz) at which MAVProxy requests data streams from ArduPilot via `MAV_CMD_REQUEST_DATA_STREAM`; drives `/mavros/*` topic rates. ArduPilot rate-limits below the request; observed `/mavros/imu/data` at ~5 Hz with `--streamrate 10`. |
 
 ## Defaults
 
 ArduCopter is launched with `--defaults copter.parm,gazebo-iris.parm`. The `gazebo-iris.parm` file (shipped with the ArduPilot tree) configures `FRAME_CLASS`, `FRAME_TYPE`, the sonar/rangefinder for IRLock, and the parameters expected by the Gazebo iris model.
+
+ArduCopter 4.8 removed the `SR0_*` per-channel stream-rate params for SERIAL0 (the channel SITL uses) — `MAVPROXY_STREAMRATE` is now the only knob.
 
 ## Build
 

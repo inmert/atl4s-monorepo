@@ -38,7 +38,8 @@ Gazebo Harmonic ◀─UDP 9002 (FDM)─▶ ArduCopter ──TCP 5760──▶ MA
 - **Host networking everywhere.** No bridge networks, no per-container port maps.
 - **Two pub/sub layers.** ROS topics inside the pipeline; GCP Pub/Sub for events leaving the pipeline.
 - **Foxglove Studio for visualization.** Browser-based, WebSocket on TCP 8765.
-- **Custom messages in `shared/atl4s_msgs/`.** Created when the first service needs one (not yet).
+- **`diagnostic_msgs/DiagnosticArray` for health.** Standard ROS type instead of standing up `shared/atl4s_msgs/` early; Foxglove's Diagnostics panel renders it directly.
+- **Custom messages in `shared/atl4s_msgs/`.** Created when the first perception service needs one (not yet).
 
 ## Repository layout
 
@@ -50,14 +51,16 @@ atl4s-monorepo/
 ├── .env / .env.example
 ├── docs/                     architecture, deployment, ros-topics
 ├── services/
-│   ├── sitl/                 ArduPilot SITL + MAVProxy fan-out
+│   ├── sitl/                 ArduPilot SITL + MAVProxy fan-out (sim profile)
+│   ├── gazebo/               Gazebo Harmonic + ArduPilot SITL plugin (sim profile, headless GPU)
+│   ├── gz-bridge/            Gazebo topics → ROS 2 names (sim profile)
 │   ├── mavros/               MAVLink ⇄ ROS 2 bridge
 │   ├── foxglove/             ROS 2 topics → WebSocket on TCP 8765
 │   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
+│   ├── healthcheck/          Topic-liveness monitor; stdout + HTTP /health + /atl4s/health
+│   ├── bag-web/              Browser UI for the GCS bag bucket (HTTP Basic auth, TCP 8089)
 │   ├── bag-record/           Records selected topics to mcap (record profile)
-│   ├── uploader/             Pushes completed bags to GCS (record profile)
-│   ├── gazebo/               Gazebo Harmonic + ArduPilot SITL plugin (headless, GPU)
-│   └── gz-bridge/            Gazebo topics → ROS 2 names (camera, IMU, clock)
+│   └── uploader/             Pushes completed bags to GCS (record profile)
 ├── shared/
 │   └── fastdds_profiles.xml  shared FastDDS XML (see gotchas)
 ├── data/bags/                (gitignored) local staging area for bags before upload
@@ -94,22 +97,31 @@ atl4s-monorepo/
 **Full pipeline working with Gazebo as the simulator.**
 
 - Gazebo Harmonic 8.11 rendering on L4 GPU, iris_with_gimbal model in `iris_runway.sdf`.
-- SITL: `arducopter --model JSON` connected to Gazebo's FDM bridge on UDP 9002. 1413 params synced, EKF3 IMU0/1 initialised and tilt-aligned, `ArduPilot Ready`.
-- MAVROS: bound on `0.0.0.0:14550`, link established. `AUTOPILOT_VERSION` round-trip succeeds.
-- gz-bridge: `/camera/image` (640×480), `/camera/camera_info`, `/imu/gazebo` (~600 Hz), `/clock` all flowing as ROS 2 topics.
-- Foxglove: listening on `0.0.0.0:8765`, can subscribe to both Gazebo and MAVROS topics.
+- SITL: `arducopter --model JSON` connected to Gazebo's FDM bridge on UDP 9002. 1413 params synced, EKF3 IMU0/1 initialised and tilt-aligned, `ArduPilot Ready`. MAVProxy `--streamrate 10` (was the default 4 → topic rates were ~2 Hz).
+- MAVROS: bound on `0.0.0.0:14550`, link established. `/mavros/*` sensor topics at ~5 Hz (capped by ArduPilot below the requested 10).
+- gz-bridge: `/camera/image` (640×480 @ 5 Hz), `/camera/camera_info`, `/imu/gazebo` (~600 Hz), `/clock` (~600 Hz) flowing as ROS 2 topics.
+- Foxglove: WebSocket on `0.0.0.0:8765`. BE whitelist covers `/imu/gazebo`, `/clock`, `/mavros/.*`, `/uas1/.*` (raw MAVLink dropped silently without the last one).
 - Commander: low-battery → `set_mode RTL` verified end-to-end (forced via `BATTERY_LOW_THRESHOLD=1.0`).
+- Healthcheck: tracks 7 topics, reports stdout summary every 5 s, HTTP `GET /health` on `:8088` (200/503), publishes `/atl4s/health` (DiagnosticArray) for Foxglove.
 - bag-record + uploader: verified end-to-end via `./scripts/bag-record.sh 10 atl4s-gazebo-test` — 40.8 MiB mcap with 10080 messages including 44 camera frames, uploaded to `gs://atl4s-rosbags/atl4s-gazebo-test/`.
+- bag-web: browser UI on `:8089` for listing/uploading/deleting bags in `gs://atl4s-rosbags`. HTTP Basic auth via `BAG_WEB_USER` / `BAG_WEB_PASS` in `.env`.
 
 Verify:
 
 ```bash
+# MAVROS link
 docker exec atl4s-mavros bash -c \
   "source /opt/ros/humble/setup.bash && \
    ros2 topic echo /mavros/state --qos-reliability best_effort --once"
+
+# Pipeline liveness
+curl -sS localhost:8088/health | jq .status        # OK if all required topics fresh
+
+# bag-web (auth from .env)
+curl -sS -u "${BAG_WEB_USER}:${BAG_WEB_PASS}" localhost:8089/api/bags | jq
 ```
 
-Browser: `https://studio.foxglove.dev/` → Open connection → Foxglove WebSocket → `ws://<VM_external_IP>:8765`.
+Browser: `https://studio.foxglove.dev/` → Open connection → Foxglove WebSocket → `ws://<VM_external_IP>:8765`. Bag UI at `http://<VM_external_IP>:8089/`.
 
 ## Conventions and gotchas
 
@@ -125,6 +137,17 @@ Same convention applies to `GCS_URL`.
 ### MAVROS QoS
 
 Most `/mavros/*` topics are Best Effort. `ros2 topic echo` defaults to Reliable and will silently fail to subscribe — always pass `--qos-reliability best_effort`. `ros2 topic list` and `ros2 topic hz` aren't affected.
+
+### Foxglove subscription QoS
+
+Foxglove Bridge subscribes Reliable + Volatile by default. Two failure modes:
+
+1. **BE publisher + Reliable sub → no data.** Fix via the `best_effort_qos_topic_whitelist` regex list in [services/foxglove/params.yaml](services/foxglove/params.yaml). Current entries: `/imu/gazebo`, `/clock`, `/mavros/.*`, `/uas1/.*`. Add new BE namespaces here when you create services.
+2. **TRANSIENT_LOCAL publisher + Volatile sub → latched message missed.** Affects `/tf_static`, `/mavros/home_position/home`, `/mavros/mission/*`, `/mavros/global_position/gp_origin`. They appear "stuck waiting for next message" in Foxglove panels because the latched value was sent before the sub joined. `foxglove_bridge 3.x` auto-matches durability when it sees the publisher's QoS, so this is usually fine in practice — but if a specific latched topic is empty in Foxglove, this is why.
+
+### MAVProxy stream rate
+
+ArduCopter 4.8 removed the `SR0_*` per-channel stream-rate params for SERIAL0 (the channel SITL uses). MAVProxy is now the only knob — set `MAVPROXY_STREAMRATE` (default 10 Hz) which becomes `mavproxy.py --streamrate <n>`. ArduPilot rate-limits below the requested value (observed ~5 Hz on `/mavros/imu/data`, `/mavros/global_position/*`, etc.). Don't waste time looking for `SR0_*` in `mav.parm` — only `MAV1_*`/`MAV2_*`/`MAV3_*` exist, and all read 0 for SERIAL0.
 
 ### MAVProxy fan-out direction
 
@@ -154,7 +177,7 @@ ArduCopter logs `Flight battery warning` and triggers `RTL` briefly on every SIT
 
 Two harmless messages on every `atl4s-gazebo` start:
 
-- `Error while loading the library [libGstCameraPlugin.so]: libdebuginfod.so.1: cannot open shared object file` — the gstreamer camera-streaming plugin needs `libdebuginfod1` at runtime. We don't use gstreamer streaming (`ros_gz_bridge` is our path in B.2). Install `libdebuginfod1` in the gazebo image to silence.
+- `Error while loading the library [libGstCameraPlugin.so]: libdebuginfod.so.1: cannot open shared object file` — the gstreamer camera-streaming plugin needs `libdebuginfod1` at runtime. We use `ros_gz_bridge` instead. Install `libdebuginfod1` in the gazebo image to silence.
 - `libEGL warning: egl: failed to create dri2 screen` — Gazebo's EGL backend falls back from DRI2 to the NVIDIA EGL device extension, which works. `nvidia-smi` inside the container shows the GPU in use.
 
 ### `ros2 bag record` QoS override YAML
@@ -167,26 +190,28 @@ Same trap as the env merge above: a service-level `volumes:` list silently repla
 
 ## Service inventory
 
-| # | Service | Status | Notes |
-|---|---|---|---|
-| 1 | `mavros` | running | MAVLink ⇄ ROS 2 bridge. |
-| 2 | `sitl` | running | ArduPilot SITL + MAVProxy. Only under `--profile sim`. |
-| 3 | `foxglove` | running | `ros-humble-foxglove-bridge` on TCP 8765. Image includes `ros-humble-mavros-msgs` so Studio can call MAVROS services. Add the `-msgs` package of every new service that exposes services. |
-| 4 | `commander` | running | Autonomy node. Low-battery latch → `set_mode RTL`. Configurable via `BATTERY_LOW_THRESHOLD`. |
-| 5 | `bag-record` | running | `ros2 bag record` → mcap under `data/bags/<name>/`. Under `record` profile. Topics via `RECORD_TOPICS`. |
-| 6 | `uploader` | running | Polls `data/bags`; uploads completed bags to `gs://atl4s-rosbags`. Idempotent via `<bag>.uploaded` sentinel. Uses VM service account via GCE metadata server. |
-| 7 | `gazebo` | running | Gazebo Harmonic 8.11 + `ardupilot_gazebo` plugin. Iris quad with gimbal, camera, IMU, GPS in `iris_runway.sdf`. Headless rendering on the L4. SITL plugin on UDP 127.0.0.1:9002. |
-| 8 | `gz-bridge` | running | `ros_gz_bridge` mapping `/world/iris_runway/.../image`, `imu`, `clock` → `/camera/image`, `/imu/gazebo`, `/clock`. One-way (GZ_TO_ROS). Add new mappings in `services/gz-bridge/bridge.yaml`. |
-| 9 | `web-backend` | planned | FastAPI WebSocket service. Subscribes to a curated `/mavros/*` subset (Best Effort). |
-| 10 | `web-frontend` | planned | Browser dashboard against `web-backend`. |
-| 11 | `bag-replay` | planned | Pulls a bag from GCS and `ros2 bag play`s it onto the DDS bus. |
-| 12 | `perception-detector` | planned | Object detection on the L4 GPU. Camera topic available now via Gazebo, real validation when Orin is in scope. |
-| 13 | `perception-segmenter` | planned | Segmentation. |
-| 14 | `perception-fault` | planned | Fault / anomaly detection. |
-| 15 | `perception-lidar` | planned | Point-cloud processing. |
-| 16 | `fusion` | planned | Combines perception + pose into tracks / events. |
-| 17 | `event-publisher` | planned | Application events → GCP Pub/Sub. |
-| 18 | `ingestion` | last | Zenoh bridge for ROS topics over WAN from the Orin. |
+| # | Service | Status | Profile | Notes |
+|---|---|---|---|---|
+| 1 | `sitl` | running | sim | ArduCopter (`--model JSON`) + MAVProxy. `MAVPROXY_STREAMRATE` (default 10) controls `/mavros/*` rate. |
+| 2 | `gazebo` | running | sim | Gazebo Harmonic 8.11 + `ardupilot_gazebo` plugin. Iris+gimbal in `iris_runway.sdf`. Headless EGL on the L4. SITL plugin on UDP 127.0.0.1:9002. |
+| 3 | `gz-bridge` | running | sim | `ros_gz_bridge` mapping `/world/iris_runway/.../*` → `/camera/image`, `/camera/camera_info`, `/imu/gazebo`, `/clock`. One-way (GZ_TO_ROS). Add mappings in [services/gz-bridge/bridge.yaml](services/gz-bridge/bridge.yaml). |
+| 4 | `mavros` | running | always | MAVLink ⇄ ROS 2 bridge via `apm.launch`. |
+| 5 | `foxglove` | running | always | `foxglove_bridge 3.3.0` on TCP 8765. BE whitelist in `params.yaml`; `mavros_msgs` installed so Studio can call MAVROS services. Add the `-msgs` package of every new service that exposes services. |
+| 6 | `commander` | running | always | Autonomy. Low-battery latch → `/mavros/set_mode RTL`. Threshold via `BATTERY_LOW_THRESHOLD`. |
+| 7 | `healthcheck` | running | always | Topic-liveness monitor. Stdout summary + HTTP `/health` on 8088 + `/atl4s/health` (DiagnosticArray). |
+| 8 | `bag-web` | running | always | Browser UI for `gs://atl4s-rosbags`. HTTP Basic on TCP 8089. Create + view + download + delete. |
+| 9 | `bag-record` | running | record | `ros2 bag record` → mcap under `data/bags/<name>/`. Topics via `RECORD_TOPICS`. |
+| 10 | `uploader` | running | record | Watches `data/bags`; uploads completed bag dirs to `gs://atl4s-rosbags`. Idempotent via `<bag>.uploaded` sentinel. VM service account via metadata server. |
+| 11 | `web-backend` | planned | — | FastAPI WebSocket subscribing to curated `/mavros/*` + `/atl4s/*` slice; foundation for the custom UI distinct from Foxglove. |
+| 12 | `web-frontend` | planned | — | Browser dashboard against `web-backend`. |
+| 13 | `bag-replay` | planned | — | Pulls a bag from GCS by name and `ros2 bag play`s it onto the DDS bus. One-shot. |
+| 14 | `perception-detector` | planned | — | YOLO on `/camera/image`, L4 GPU. First use of `shared/atl4s_msgs/`. |
+| 15 | `perception-segmenter` | planned | — | Segmentation. |
+| 16 | `perception-fault` | planned | — | Fault / anomaly detection. |
+| 17 | `perception-lidar` | planned | — | Point-cloud processing, once a lidar source exists (Gazebo gpu_lidar back-pressures the FDM loop — see Open items). |
+| 18 | `fusion` | planned | — | Combines perception + pose into tracks / events. |
+| 19 | `event-publisher` | planned | — | Application events → GCP Pub/Sub. |
+| 20 | `ingestion` | planned | — | Zenoh bridge for ROS topics over WAN from the Orin (last). |
 
 ## Topic contracts
 
@@ -199,14 +224,14 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
 
 ## Open items
 
-1. **`web-backend` + `web-frontend`** — FastAPI WebSocket in `services/web-backend/`, browser dashboard in `services/web-frontend/`.
-2. **B.3 — lidar + richer scene.** Add a 3D lidar sensor block to `services/gazebo/world/atl4s.sdf` (Velodyne-style ray sensor with ~16 beams). Switch `GZ_WORLD` default to `atl4s.sdf` so the iris flies in the obstacle course instead of the bare runway. Add the lidar topic to `bridge.yaml` as `/lidar/points` (sensor_msgs/PointCloud2). Update `bag-record` defaults.
-3. **`bag-replay` service** — pulls a bag from GCS by name and `ros2 bag play`s it onto the DDS bus. Foxglove and commander see it as live data. Pattern: one-shot `docker compose run --rm bag-replay BAG=<name>`.
-4. **First perception service** — `shared/atl4s_msgs/` for Detection types, then `services/perception-detector` (CUDA base + YOLO). Camera is now live so validation works against `/camera/image` directly.
-5. **More `commander` behaviors** — takeoff command, waypoint loops, geofence triggers, event publishing to `/atl4s/events`.
-6. **Drone integration** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. Orin-side `bag-record` + `uploader` push real RealSense + lidar bags to GCS. No downstream changes expected.
+1. **More `commander` behaviors** — takeoff command, waypoint loop, geofence triggers, event publishing to `/atl4s/events`. Pure ROS 2 work, no new infrastructure.
+2. **First perception service (`perception-detector`)** — stand up `shared/atl4s_msgs/` for Detection types, then `services/perception-detector` (CUDA base + YOLO on `/camera/image`). First use of the L4 GPU for inference.
+3. **`web-backend` + `web-frontend`** — FastAPI WebSocket service for a curated `/mavros/*` + `/atl4s/*` slice, plus a browser dashboard. Distinct from `bag-web`, which is GCS-only. Becomes the custom UI replacing Foxglove for operational views.
+4. **`bag-replay` service** — pulls a bag from GCS by name and `ros2 bag play`s it onto the DDS bus. Useful once perception services exist (replay recorded camera frames against the detector). Pattern: one-shot `docker compose run --rm bag-replay BAG=<name>`.
+5. **Drone integration (Orin Nano)** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. Orin-side `bag-record` + `uploader` push real RealSense + lidar bags to GCS. Zenoh bridge for ROS topics over WAN comes at the end (`ingestion` service).
+6. **B.3 — lidar in Gazebo (parked).** Attempted: gpu_lidar block in `services/gazebo/world/models/atl4s_lidar/` + composite `iris_with_lidar` model + `atl4s.sdf` world. Even at 90×4 rays @ 1 Hz the render back-pressures the JSON-FDM loop — SITL logs continuous `No JSON sensor message received, resending servos`. Retry path: lighter ray budget (e.g. 16×1), async sensor rendering, or skip Gazebo lidar entirely and validate `perception-lidar` against real Orin/RealSense data later. Files were rolled back; not in the repo today.
 7. **Security tightening** — IAP-only SSH (`35.235.240.0/20`), Foxglove / web behind Tailscale, per-team IAM bindings. Defer until test phase is over.
-8. **GCS bucket region** — bucket is us-east4 but VM is northamerica-northeast1; consider recreating co-located for production.
+8. **GCS bucket region** — bucket is us-east4 but VM is northamerica-northeast1; consider recreating co-located for production traffic.
 
 ## Commands reference
 

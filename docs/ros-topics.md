@@ -22,7 +22,26 @@ Authoritative list of topics other services depend on. Update when a service is 
 | `/mavros/cmd/arming` (service) | `mavros_msgs/CommandBool` | in | Arm/disarm |
 | `/mavros/set_mode` (service) | `mavros_msgs/SetMode` | in | Flight mode change |
 
-Full list (~50 topics) available at runtime via `ros2 topic list`.
+MAVROS publishes ~140 topics under `/mavros/*`. Most that aren't listed have no data in default SITL because ArduPilot doesn't stream that message group at the configured rates. Run `ros2 topic list` for the full set and `ros2 topic hz <topic> --qos-reliability best_effort` to see which are actually publishing.
+
+## Gazebo sensors (gz-bridge, sim profile)
+
+| Topic | Type | Direction | Description |
+|---|---|---|---|
+| `/camera/image` | `sensor_msgs/Image` | out | RGB frames from the iris gimbal camera (640×480 @ 5 Hz) |
+| `/camera/camera_info` | `sensor_msgs/CameraInfo` | out | Intrinsics for `/camera/image` |
+| `/imu/gazebo` | `sensor_msgs/Imu` | out | Ground-truth IMU (~600 Hz, Best Effort recommended) |
+| `/clock` | `rosgraph_msgs/Clock` | out | Sim time (~600 Hz) |
+
+Renames are configured in [services/gz-bridge/bridge.yaml](../services/gz-bridge/bridge.yaml). Gazebo-side topic paths include the world name; the ROS-side names stay constant.
+
+## Health (healthcheck)
+
+| Topic | Type | Direction | Description |
+|---|---|---|---|
+| `/atl4s/health` | `diagnostic_msgs/DiagnosticArray` | out | Per-tracked-topic freshness (OK/WARN/ERROR) at 0.2 Hz |
+
+Also surfaced as HTTP `GET /health` on TCP 8088 (`200` if all required topics fresh, `503` otherwise).
 
 ## Perception (planned)
 

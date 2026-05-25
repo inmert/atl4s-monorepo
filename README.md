@@ -23,14 +23,16 @@ atl4s-monorepo/
 ├── .env / .env.example
 ├── docs/                     architecture, deployment, ros-topics
 ├── services/
-│   ├── sitl/                 ArduCopter (--model JSON) + MAVProxy fan-out
+│   ├── sitl/                 ArduCopter (--model JSON) + MAVProxy fan-out (sim)
+│   ├── gazebo/               Gazebo Harmonic + ArduPilot SITL plugin, headless on L4 GPU (sim)
+│   ├── gz-bridge/            Maps Gazebo topics → ROS 2 names (sim)
 │   ├── mavros/               MAVLink ⇄ ROS 2 bridge
 │   ├── foxglove/             ROS 2 topics → WebSocket on TCP 8765
 │   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
+│   ├── healthcheck/          Topic-liveness monitor: stdout + HTTP /health + /atl4s/health
+│   ├── bag-web/              Browser UI for rosbags in GCS (HTTP Basic, TCP 8089)
 │   ├── bag-record/           Records selected topics to mcap (record profile)
-│   ├── uploader/             Pushes completed bags to GCS (record profile)
-│   ├── gazebo/               Gazebo Harmonic + ArduPilot SITL plugin, headless on L4 GPU
-│   └── gz-bridge/            Maps Gazebo topics → ROS 2 names (/camera/image, /imu/gazebo, …)
+│   └── uploader/             Pushes completed bags to GCS (record profile)
 ├── shared/                   FastDDS XML profile shared by all ROS containers
 ├── deploy/                   (Terraform, planned)
 └── scripts/                  dev-up.sh, prod-up.sh, topic-check.sh,
@@ -68,25 +70,26 @@ See [HANDOFF.md](HANDOFF.md) for the working context and open items.
 
 ## Services
 
-| Service | Status | Purpose |
+| Service | Profile | Purpose |
 |---|---|---|
-| `sitl` | running | ArduPilot SITL + MAVProxy. Only under `--profile sim`. |
-| `mavros` | running | MAVLink ⇄ ROS 2 bridge. Always on. |
-| `foxglove` | running | Browser visualization via `ros-humble-foxglove-bridge`, TCP 8765. |
-| `commander` | running | Autonomy node. Low-battery latch → `set_mode RTL`. |
-| `bag-record` | running | Records selected ROS 2 topics to mcap. `record` profile. |
-| `uploader` | running | Pushes completed bags to `gs://atl4s-rosbags`. `record` profile. |
-| `gazebo` | running | Gazebo Harmonic + ArduPilot SITL plugin. Iris with camera/IMU/GPS in `iris_runway.sdf`, headless on L4. |
-| `gz-bridge` | running | `ros_gz_bridge` mapping Gazebo sensor topics → stable ROS 2 names (`/camera/image`, `/camera/camera_info`, `/imu/gazebo`, `/clock`). |
-| `web-backend` | planned | FastAPI WebSocket service for the custom dashboard. |
-| `web-frontend` | planned | Browser dashboard. |
-| `bag-replay` | planned | Replays a GCS-stored bag back onto the DDS bus. |
-| `perception-detector` | planned | Object detection on the L4 GPU. |
+| `sitl` | sim | ArduPilot SITL + MAVProxy. |
+| `gazebo` | sim | Gazebo Harmonic + ArduPilot SITL plugin. Iris with camera/IMU/GPS, headless on L4. |
+| `gz-bridge` | sim | `ros_gz_bridge` mapping Gazebo sensor topics → `/camera/image`, `/camera/camera_info`, `/imu/gazebo`, `/clock`. |
+| `mavros` | always | MAVLink ⇄ ROS 2 bridge. |
+| `foxglove` | always | Browser visualization via `foxglove_bridge`, TCP 8765. |
+| `commander` | always | Autonomy node. Low-battery latch → `set_mode RTL`. |
+| `healthcheck` | always | Topic-liveness monitor. stdout, HTTP `:8088/health`, `/atl4s/health`. |
+| `bag-web` | always | Browser UI for `gs://atl4s-rosbags` (list / upload / download / delete). HTTP Basic on TCP 8089. |
+| `bag-record` | record | `ros2 bag record` → mcap under `data/bags/<name>/`. |
+| `uploader` | record | Pushes completed bags to `gs://atl4s-rosbags`. |
+| `web-backend` | planned | FastAPI WebSocket for the custom dashboard slice of `/mavros/*` + `/atl4s/*`. Distinct from `bag-web`. |
+| `web-frontend` | planned | Browser dashboard against `web-backend`. |
+| `bag-replay` | planned | `ros2 bag play`s a GCS-stored bag back onto the DDS bus. |
+| `perception-detector` | planned | Object detection on the L4 GPU (first GPU service, first user of `shared/atl4s_msgs/`). |
 | `perception-segmenter` | planned | Segmentation. |
 | `perception-fault` | planned | Fault / anomaly detection. |
-| `perception-lidar` | planned | Point-cloud processing. |
+| `perception-lidar` | planned | Point-cloud processing (gated on a real lidar source — Gazebo gpu_lidar back-pressures FDM). |
 | `fusion` | planned | Combines perception + pose into tracks / events. |
-| `uploader` | planned | Recorded bags → GCS. |
 | `event-publisher` | planned | Application events → GCP Pub/Sub. |
 | `ingestion` | planned | Zenoh bridge for ROS topics over WAN from the Orin Nano. |
 

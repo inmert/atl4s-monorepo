@@ -59,8 +59,7 @@ atl4s-monorepo/
 │   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
 │   ├── healthcheck/          Topic-liveness monitor; stdout + HTTP /health + /atl4s/health
 │   ├── bag-web/              Browser UI for the GCS bag bucket (HTTP Basic auth, TCP 8089)
-│   ├── bag-record/           Records selected topics to mcap (record profile)
-│   └── bag-uploader/         Pushes completed bags to GCS (record profile)
+│   └── rosbag-manager/       HTTP API for bag-plane ops: record / upload / GCS browser / replay (loopback 127.0.0.1:8086)
 ├── shared/
 │   └── fastdds_profiles.xml  shared FastDDS XML (see gotchas)
 ├── data/bags/                (gitignored) local staging area for bags before upload
@@ -103,7 +102,7 @@ atl4s-monorepo/
 - Foxglove: WebSocket on `0.0.0.0:8765`. BE whitelist covers `/imu/gazebo`, `/clock`, `/mavros/.*`, `/uas1/.*` (raw MAVLink dropped silently without the last one).
 - Commander: low-battery → `set_mode RTL` verified end-to-end (forced via `BATTERY_LOW_THRESHOLD=1.0`).
 - Healthcheck: tracks 7 topics, reports stdout summary every 5 s, HTTP `GET /health` on `:8088` (200/503), publishes `/atl4s/health` (DiagnosticArray) for Foxglove.
-- bag-record + bag-uploader: verified end-to-end via `./scripts/bag-record.sh 10 atl4s-gazebo-test` — 40.8 MiB mcap with 10080 messages including 44 camera frames, uploaded to `gs://atl4s-rosbags/atl4s-gazebo-test/`.
+- rosbag-manager: HTTP API on `127.0.0.1:8086` for record / upload / GCS browser / replay. Smoke tested end-to-end via `./scripts/bag-record.sh` — record subprocess + watcher upload + GCS confirmed; replay downloads from GCS, plays, and cleans up `${REPLAY_DIR}`.
 - bag-web: browser UI on `:8089` for listing/uploading/deleting bags in `gs://atl4s-rosbags`. HTTP Basic auth via `BAG_WEB_USER` / `BAG_WEB_PASS` in `.env`.
 
 Verify:
@@ -182,11 +181,11 @@ Two harmless messages on every `atl4s-gazebo` start:
 
 ### `ros2 bag record` QoS override YAML
 
-`ros2 bag record` defaults its subscribers to Reliable. To capture `/mavros/*` (Best Effort) you must pass `--qos-profile-overrides-path` with per-topic profiles. The YAML shape Humble's parser accepts is `topic: <dict>`, **not** `topic: [<dict>]` — the more common list form crashes with `'list' object has no attribute 'items'`. `bag-record`'s entrypoint generates the correct shape dynamically from `RECORD_TOPICS`.
+`ros2 bag record` defaults its subscribers to Reliable. To capture `/mavros/*` (Best Effort) you must pass `--qos-profile-overrides-path` with per-topic profiles. The YAML shape Humble's parser accepts is `topic: <dict>`, **not** `topic: [<dict>]` — the more common list form crashes with `'list' object has no attribute 'items'`. `rosbag-manager` (`app/record.py`) generates the correct shape per recording from the request's `topics` list.
 
 ### Compose volume merge
 
-Same trap as the env merge above: a service-level `volumes:` list silently replaces `x-common.volumes`. Any service that adds its own volume mounts must re-declare the FastDDS profile mount or lose it. `bag-record` and `bag-uploader` both do this with a one-line comment at the call site.
+Same trap as the env merge above: a service-level `volumes:` list silently replaces `x-common.volumes`. Any service that adds its own volume mounts must re-declare the FastDDS profile mount or lose it. `rosbag-manager` does this with a one-line comment at the call site.
 
 ## Service inventory
 
@@ -200,17 +199,15 @@ Same trap as the env merge above: a service-level `volumes:` list silently repla
 | 6 | `commander` | running | always | Autonomy. Low-battery latch → `/mavros/set_mode RTL`. Threshold via `BATTERY_LOW_THRESHOLD`. |
 | 7 | `healthcheck` | running | always | Topic-liveness monitor. Stdout summary + HTTP `/health` on 8088 + `/atl4s/health` (DiagnosticArray). |
 | 8 | `bag-web` | running | always | Browser UI for `gs://atl4s-rosbags`. HTTP Basic on TCP 8089. Scheduled for removal once `dashboard` reaches bag-browser parity. |
-| 9 | `bag-record` | running | record | `ros2 bag record` → mcap under `data/bags/<name>/`. Topics via `RECORD_TOPICS`. Scheduled for removal once `rosbag-manager` subsumes. |
-| 10 | `bag-uploader` | running | record | Watches `data/bags`; uploads completed bag dirs to `gs://atl4s-rosbags`. Idempotent via `<bag>.uploaded` sentinel. VM service account via metadata server. Scheduled for removal once `rosbag-manager` subsumes. |
-| 11 | `rosbag-manager` | planned | always | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser (list / upload / download / delete), and replay via `ros2 bag play`. Binds `127.0.0.1:8086` (loopback only). `FROM ros:humble`. Consumed by `dashboard`, `scripts/bag-record.sh`, and any future caller on the host. Subsumes `bag-record` + `bag-uploader` + `bag-web`'s GCS API + the planned bag-replay. |
-| 12 | `dashboard` | planned | always | Single human-facing surface on TCP 8089 (reuses bag-web's port + `BAG_WEB_USER` / `BAG_WEB_PASS`). Live topic view (`/mavros/*`, `/atl4s/*`, camera, `/perception/*`) via rclpy → WebSocket. Bag browser, record, and replay UI proxy to `rosbag-manager` under HTTP Basic. React + Vite + TS frontend; FastAPI + rclpy backend in one image. Subsumes planned web-backend, web-frontend; supersedes bag-web's UI. |
-| 13 | `perception-detector` | planned | — | YOLO on `/camera/image`, L4 GPU. First use of `shared/atl4s_msgs/`. |
-| 14 | `perception-segmenter` | planned | — | Segmentation. |
-| 15 | `perception-fault` | planned | — | Fault / anomaly detection. |
-| 16 | `perception-lidar` | planned | — | Point-cloud processing, once a lidar source exists (Gazebo gpu_lidar back-pressures the FDM loop — see Open items). |
-| 17 | `fusion` | planned | — | Combines perception + pose into tracks / events. |
-| 18 | `event-publisher` | planned | — | Application events → GCP Pub/Sub. |
-| 19 | `ingestion` | planned | — | Zenoh bridge for ROS topics over WAN from the Orin (last). |
+| 9 | `rosbag-manager` | running | always | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser (list / upload / download / delete), and replay via `ros2 bag play`. Binds `127.0.0.1:8086` (loopback only). `FROM ros:humble`. Consumed by `dashboard`, `scripts/bag-record.sh`, and any future caller on the host. |
+| 10 | `dashboard` | planned | always | Single human-facing surface on TCP 8089 (reuses bag-web's port + `BAG_WEB_USER` / `BAG_WEB_PASS`). Live topic view (`/mavros/*`, `/atl4s/*`, camera, `/perception/*`) via rclpy → WebSocket. Bag browser, record, and replay UI proxy to `rosbag-manager` under HTTP Basic. React + Vite + TS frontend; FastAPI + rclpy backend in one image. Subsumes planned web-backend, web-frontend; supersedes bag-web's UI. |
+| 11 | `perception-detector` | planned | — | YOLO on `/camera/image`, L4 GPU. First use of `shared/atl4s_msgs/`. |
+| 12 | `perception-segmenter` | planned | — | Segmentation. |
+| 13 | `perception-fault` | planned | — | Fault / anomaly detection. |
+| 14 | `perception-lidar` | planned | — | Point-cloud processing, once a lidar source exists (Gazebo gpu_lidar back-pressures the FDM loop — see Open items). |
+| 15 | `fusion` | planned | — | Combines perception + pose into tracks / events. |
+| 16 | `event-publisher` | planned | — | Application events → GCP Pub/Sub. |
+| 17 | `ingestion` | planned | — | Zenoh bridge for ROS topics over WAN from the Orin (last). |
 
 ## Topic contracts
 
@@ -225,15 +222,7 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
 
 1. **More `commander` behaviors** — takeoff command, waypoint loop, geofence triggers, event publishing to `/atl4s/events`. Pure ROS 2 work, no new infrastructure.
 2. **First perception service (`perception-detector`)** — stand up `shared/atl4s_msgs/` for Detection types, then `services/perception-detector` (CUDA base + YOLO on `/camera/image`). First use of the L4 GPU for inference.
-3. **Build `rosbag-manager` service** — HTTP API for every bag-plane operation. One container, `FROM ros:humble`, FastAPI on `127.0.0.1:8086`. Replaces `bag-record` + `bag-uploader` + `bag-web`'s GCS API and absorbs the planned bag-replay. Owns the `/data/bags` mount and the GCS client. Staged build, one commit each:
-   1. Scaffold `services/rosbag-manager/` (FastAPI on `ros:humble`, `/healthz`, compose entry under `always`, loopback bind).
-   2. `POST /api/record/start`, `POST /api/record/stop`, `GET /api/record/status` — manages a single `ros2 bag record` subprocess (one recording at a time; queue later if needed).
-   3. Watcher loop + `GET /api/uploads` + `POST /api/uploads/{name}` — port from `bag-uploader` and expose status.
-   4. GCS browser: `GET /api/bags`, `GET /api/bags/{name}/files`, file download, multipart upload, `DELETE /api/bags/{name}` — port from `bag-web`'s API.
-   5. `POST /api/replay/start`, `POST /api/replay/stop`, `GET /api/replay/status` — manages a single `ros2 bag play` subprocess (download from GCS to `/tmp/replays`, SIGTERM stop).
-   6. Rewrite `scripts/bag-record.sh` to call the API (replaces `docker compose up bag-record bag-uploader` + sentinel polling).
-   7. Delete `services/bag-record/` and `services/bag-uploader/`; retire the `record` compose profile.
-4. **Build `dashboard` service** — single human-facing surface; UI + live topic bridge + proxy to `rosbag-manager`. One container: multi-stage Dockerfile (Node build → `ros:humble` runtime), FastAPI + rclpy backend, React + Vite + TS frontend. Reuses bag-web's port 8089 and `BAG_WEB_USER` / `BAG_WEB_PASS`. Owns no bag state — proxies all bag operations to `rosbag-manager`. Staged build, one commit each:
+3. **Build `dashboard` service** — single human-facing surface; UI + live topic bridge + proxy to `rosbag-manager`. One container: multi-stage Dockerfile (Node build → `ros:humble` runtime), FastAPI + rclpy backend, React + Vite + TS frontend. Reuses bag-web's port 8089 and `BAG_WEB_USER` / `BAG_WEB_PASS`. Owns no bag state — proxies all bag operations to `rosbag-manager`. Staged build, one commit each:
    1. Scaffold `services/dashboard/` (multi-stage Dockerfile, React skeleton, FastAPI `/healthz`, compose entry under `always`; depends on `rosbag-manager`).
    2. Backend proxy layer: forward `/api/bags/*`, `/api/record/*`, `/api/replay/*`, `/api/uploads*` to `http://127.0.0.1:8086`. HTTP Basic enforced at the edge.
    3. Frontend Bag-browser page hitting the proxied endpoints → reach `bag-web` UI parity → delete `services/bag-web/` and its compose entry.
@@ -242,10 +231,10 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
    6. Record + Replay pages calling the proxied endpoints; live state via polling or `/ws/replay`.
    7. `/ws/health` + Health panel from `/atl4s/health`.
    8. Reserve `/perception/*` subscription hook for the first perception service.
-5. **Drone integration (Orin Nano)** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. Orin-side recording + upload calls `rosbag-manager`'s API to push real RealSense + lidar bags to GCS. Zenoh bridge for ROS topics over WAN comes at the end (`ingestion` service).
-6. **B.3 — lidar in Gazebo (parked).** Attempted: gpu_lidar block in `services/gazebo/world/models/atl4s_lidar/` + composite `iris_with_lidar` model + `atl4s.sdf` world. Even at 90×4 rays @ 1 Hz the render back-pressures the JSON-FDM loop — SITL logs continuous `No JSON sensor message received, resending servos`. Retry path: lighter ray budget (e.g. 16×1), async sensor rendering, or skip Gazebo lidar entirely and validate `perception-lidar` against real Orin/RealSense data later. Files were rolled back; not in the repo today.
-7. **Security tightening** — IAP-only SSH (`35.235.240.0/20`), Foxglove / web behind Tailscale, per-team IAM bindings. Defer until test phase is over.
-8. **GCS bucket region** — bucket is us-east4 but VM is northamerica-northeast1; consider recreating co-located for production traffic.
+4. **Drone integration (Orin Nano)** — Orin runs MAVProxy with `--out udp:<VM_external_IP>:14550`, open UDP 14550 in the firewall to the Orin's IP. Orin-side recording + upload calls `rosbag-manager`'s API to push real RealSense + lidar bags to GCS. Zenoh bridge for ROS topics over WAN comes at the end (`ingestion` service).
+5. **B.3 — lidar in Gazebo (parked).** Attempted: gpu_lidar block in `services/gazebo/world/models/atl4s_lidar/` + composite `iris_with_lidar` model + `atl4s.sdf` world. Even at 90×4 rays @ 1 Hz the render back-pressures the JSON-FDM loop — SITL logs continuous `No JSON sensor message received, resending servos`. Retry path: lighter ray budget (e.g. 16×1), async sensor rendering, or skip Gazebo lidar entirely and validate `perception-lidar` against real Orin/RealSense data later. Files were rolled back; not in the repo today.
+6. **Security tightening** — IAP-only SSH (`35.235.240.0/20`), Foxglove / web behind Tailscale, per-team IAM bindings. Defer until test phase is over.
+7. **GCS bucket region** — bucket is us-east4 but VM is northamerica-northeast1; consider recreating co-located for production traffic.
 
 ## Commands reference
 
@@ -254,12 +243,12 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
 ./scripts/dev-up.sh                       # SITL + downstream
 ./scripts/prod-up.sh                      # no SITL
 ./scripts/topic-check.sh                  # sanity check
-docker compose --profile sim --profile record down  # stop everything
+docker compose --profile sim down         # stop everything
 
-# Record + upload (record profile)
+# Record + upload (via rosbag-manager API)
 ./scripts/bag-record.sh 30                # record 30s, wait for upload
 ./scripts/bag-list.sh                     # list bags in GCS
-docker compose --profile record up -d bag-uploader  # bag-uploader only (e.g. drop bags in by hand)
+curl -fsS -X POST 127.0.0.1:8086/api/uploads/<bag-name>  # force-upload one bag (e.g. drop bags in by hand)
 
 # Logs
 docker compose logs -f
@@ -281,9 +270,9 @@ docker exec atl4s-mavros bash -c \
 diff <(docker exec atl4s-sitl cat /entrypoint.sh) services/sitl/entrypoint.sh
 
 # Force-clean rebuild (when cached layers cause stale behavior)
-docker compose --profile sim --profile record down
+docker compose --profile sim down
 docker rmi $(docker images atl4s/* -q)
-docker compose --profile sim --profile record build --no-cache
+docker compose --profile sim build --no-cache
 ./scripts/dev-up.sh
 
 # VM cost control (~$17/day running, ~$0.07/day stopped)

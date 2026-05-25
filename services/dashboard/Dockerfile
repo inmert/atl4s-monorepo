@@ -1,16 +1,19 @@
 # dashboard — single human-facing surface for ATL4S. React + Vite + TS
 # frontend, FastAPI + rclpy backend. Multi-stage: stage 1 builds the
-# frontend, stage 2 runs uvicorn on top of ros:humble and serves the
-# built assets.
+# frontend, stage 2 colcon-builds custom message packages and runs
+# uvicorn on top of ros:humble.
+#
+# Built from the repo root so it can pick up shared/atl4s_msgs alongside
+# its own source (see docker-compose.yml `context: .`).
 
 FROM node:20-slim AS frontend-build
 
 WORKDIR /app/frontend
-COPY frontend/package.json ./
-COPY frontend/package-lock.json* ./
+COPY services/dashboard/frontend/package.json ./
+COPY services/dashboard/frontend/package-lock.json* ./
 RUN npm install
 
-COPY frontend/ ./
+COPY services/dashboard/frontend/ ./
 RUN npm run build
 
 
@@ -20,6 +23,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-pip \
+        python3-colcon-common-extensions \
         ros-humble-mavros-msgs \
     && rm -rf /var/lib/apt/lists/*
 
@@ -32,16 +36,26 @@ RUN pip3 install --no-cache-dir \
         pyyaml==6.0.2 \
         docker==7.1.0
 
+# Build atl4s_msgs into /workspace/install/ so the rclpy bridge can
+# resolve atl4s_msgs/* types when the ROS page samples
+# /perception/lidar/detections and friends. Entrypoint sources the
+# overlay before launching uvicorn.
+WORKDIR /workspace
+COPY shared/atl4s_msgs /workspace/src/atl4s_msgs
+RUN . /opt/ros/humble/setup.sh \
+ && colcon build --packages-select atl4s_msgs --merge-install \
+ && rm -rf /workspace/build /workspace/log
+
 ENV DASHBOARD_BIND=0.0.0.0
 ENV DASHBOARD_PORT=8089
 ENV ROSBAG_MANAGER_URL=http://127.0.0.1:8086
 ENV ROBOTS_CONFIG=/app/config/robots.yaml
 
 WORKDIR /app
-COPY backend/ /app/backend/
-COPY config/ /app/config/
+COPY services/dashboard/backend/ /app/backend/
+COPY services/dashboard/config/ /app/config/
 COPY --from=frontend-build /app/frontend/dist /app/static/
-COPY entrypoint.sh /entrypoint.sh
+COPY services/dashboard/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 CMD ["/entrypoint.sh"]

@@ -11,3 +11,6 @@
       - "/clock"
       - "/mavros/.*"
       - "/uas1/.*"
+      - "/lidar/.*"
+      - "/perception/.*"
+      - "/fusion/.*"

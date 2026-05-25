@@ -1,0 +1,35 @@
+# Repo-root .dockerignore. Three services (dashboard, foxglove,
+# perception-lidar) build with `context: .` so they can pick up
+# shared/atl4s_msgs/. Without trimming here every build would ship the
+# whole repo (data/bags, .git, node_modules, etc.) to the Docker daemon.
+
+.git
+.gitignore
+.gitattributes
+
+# Local runtime state that never belongs in any image.
+.env
+data/
+
+# Build outputs from prior local colcon runs (the in-image build creates
+# its own /workspace/build and /workspace/log).
+**/build/
+**/install/
+**/log/
+
+# Node + Python caches.
+**/node_modules/
+**/__pycache__/
+**/*.pyc
+**/.cache/
+**/dist/
+
+# Editor / OS scratch.
+**/.DS_Store
+**/.vscode/
+**/.idea/
+
+# Don't ship docs into images.
+HANDOFF.md
+docs/
+**/README.md

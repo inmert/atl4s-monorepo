@@ -2,6 +2,7 @@
 set -e
 
 source /opt/ros/humble/setup.bash
+source /workspace/install/setup.bash
 
 echo "[entrypoint] Launching foxglove_bridge on ${FOXGLOVE_ADDRESS}:${FOXGLOVE_PORT}..."
 # best_effort_qos_topic_whitelist is a list — fragile to pass through bash +

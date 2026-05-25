@@ -80,7 +80,11 @@ services:
   foxglove:
     <<: *common
     build:
-      context: ./services/foxglove
+      # Repo root so the Dockerfile can pick up shared/atl4s_msgs/ to
+      # colcon-build into the image. Without it Studio can't deserialize
+      # /perception/lidar/detections (or any atl4s_msgs/* topic).
+      context: .
+      dockerfile: services/foxglove/Dockerfile
     image: atl4s/foxglove:latest
     container_name: atl4s-foxglove
     environment:
@@ -100,6 +104,25 @@ services:
       BATTERY_LOW_THRESHOLD: ${BATTERY_LOW_THRESHOLD:-0.20}
     depends_on:
       - mavros
+
+  perception-lidar:
+    <<: *common
+    build:
+      # Repo root so the Dockerfile can pick up shared/atl4s_msgs/
+      # alongside services/perception-lidar/.
+      context: .
+      dockerfile: services/perception-lidar/Dockerfile
+    image: atl4s/perception-lidar:latest
+    container_name: atl4s-perception-lidar
+    environment:
+      <<: *shared-env
+      LIDAR_CONFIG: /app/config/pipelines/perception-lidar.yaml
+    # Same volume-merge trap as elsewhere; re-declare the fastdds mount
+    # and add a read-only bind on the pipeline config dir so the service
+    # reads the same file the dashboard writes.
+    volumes:
+      - ./shared/fastdds_profiles.xml:/fastdds_profiles.xml:ro
+      - ./services/dashboard/config:/app/config:ro
 
   rosbag-manager:
     <<: *common
@@ -125,7 +148,11 @@ services:
   dashboard:
     <<: *common
     build:
-      context: ./services/dashboard
+      # Repo root so the Dockerfile can pick up shared/atl4s_msgs/. The
+      # backend's rclpy bridge needs the type installed to resolve
+      # atl4s_msgs/* topics in /api/ros/topics and /ws/ros/sample.
+      context: .
+      dockerfile: services/dashboard/Dockerfile
     image: atl4s/dashboard:latest
     container_name: atl4s-dashboard
     environment:

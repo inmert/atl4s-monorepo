@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
-import { api, type Bag, type BagFile } from '../lib/api';
+import { api, type Bag, type BagFile, type BagMetadata } from '../lib/api';
 import { formatBytes, formatDate } from '../lib/format';
 
 export function Bags() {
@@ -7,6 +7,7 @@ export function Bags() {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [files, setFiles] = useState<Record<string, BagFile[]>>({});
+  const [meta, setMeta] = useState<Record<string, BagMetadata | 'missing'>>({});
 
   const [uploadName, setUploadName] = useState('');
   const [uploadFiles, setUploadFiles] = useState<FileList | null>(null);
@@ -37,6 +38,15 @@ export function Bags() {
         setFiles((f) => ({ ...f, [name]: list }));
       } catch (e) {
         setError((e as Error).message);
+      }
+    }
+    if (!meta[name]) {
+      try {
+        const m = await api.bagMetadata(name);
+        setMeta((s) => ({ ...s, [name]: m }));
+      } catch {
+        // Older bags or non-ros2 prefixes won't have metadata.yaml.
+        setMeta((s) => ({ ...s, [name]: 'missing' }));
       }
     }
   };
@@ -135,23 +145,10 @@ export function Bags() {
                     </button>
                   </td>
                 </tr>
-                {expanded === b.name && files[b.name] && (
+                {expanded === b.name && (
                   <tr className="files-row">
                     <td colSpan={5}>
-                      <table className="files">
-                        <tbody>
-                          {files[b.name].map((f) => (
-                            <tr key={f.name}>
-                              <td>{f.name}</td>
-                              <td>{formatBytes(f.size_bytes)}</td>
-                              <td>{formatDate(f.updated)}</td>
-                              <td>
-                                <a href={api.fileDownloadUrl(b.name, f.name)}>Download</a>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                      <BagDetails name={b.name} files={files[b.name]} meta={meta[b.name]} />
                     </td>
                   </tr>
                 )}
@@ -161,5 +158,77 @@ export function Bags() {
         </table>
       )}
     </section>
+  );
+}
+
+function BagDetails({
+  name,
+  files,
+  meta,
+}: {
+  name: string;
+  files: BagFile[] | undefined;
+  meta: BagMetadata | 'missing' | undefined;
+}) {
+  return (
+    <div className="bag-details">
+      <div className="bag-meta">
+        <h3>Metadata</h3>
+        {meta === undefined ? (
+          <p className="placeholder">Loading…</p>
+        ) : meta === 'missing' ? (
+          <p className="placeholder">No <code>metadata.yaml</code> in this bag.</p>
+        ) : (
+          <>
+            <div className="meta-row">
+              <span>{meta.duration_sec.toFixed(2)} s</span>
+              <span>{meta.message_count?.toLocaleString() ?? '—'} messages</span>
+              <span>{meta.topics.length} topics</span>
+              <span>{meta.storage_identifier || '—'}</span>
+            </div>
+            <table className="files">
+              <thead>
+                <tr>
+                  <th>Topic</th>
+                  <th>Type</th>
+                  <th>Messages</th>
+                </tr>
+              </thead>
+              <tbody>
+                {meta.topics.map((t) => (
+                  <tr key={t.name || Math.random()}>
+                    <td>{t.name}</td>
+                    <td><code>{t.type}</code></td>
+                    <td>{t.message_count.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
+
+      <div className="bag-files">
+        <h3>Files</h3>
+        {files === undefined ? (
+          <p className="placeholder">Loading…</p>
+        ) : (
+          <table className="files">
+            <tbody>
+              {files.map((f) => (
+                <tr key={f.name}>
+                  <td>{f.name}</td>
+                  <td>{formatBytes(f.size_bytes)}</td>
+                  <td>{formatDate(f.updated)}</td>
+                  <td>
+                    <a href={api.fileDownloadUrl(name, f.name)}>Download</a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
   );
 }

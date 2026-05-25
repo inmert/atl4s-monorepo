@@ -8,6 +8,7 @@ bind, so per-route auth is intentionally absent.
 from collections import defaultdict
 from pathlib import PurePosixPath
 
+import yaml
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
@@ -42,6 +43,37 @@ def list_bags() -> list[dict]:
     ]
     out.sort(key=lambda b: b['updated'] or '', reverse=True)
     return out
+
+
+@router.get('/{bag_name}/metadata')
+def get_metadata(bag_name: str) -> dict:
+    """Parse ``metadata.yaml`` from a GCS bag into a structured summary."""
+    safe_bag_name(bag_name)
+    blob = bucket().get_blob(f'{bag_name}/metadata.yaml')
+    if blob is None:
+        raise HTTPException(404, f'metadata.yaml not found for {bag_name!r}')
+    parsed = yaml.safe_load(blob.download_as_bytes().decode('utf-8'))
+    info = parsed.get('rosbag2_bagfile_information', {}) if isinstance(parsed, dict) else {}
+    duration_ns = info.get('duration', {}).get('nanoseconds', 0)
+    starting_ns = info.get('starting_time', {}).get('nanoseconds_since_epoch')
+    topics = []
+    for entry in info.get('topics_with_message_count', []):
+        meta = entry.get('topic_metadata', {}) or {}
+        topics.append({
+            'name': meta.get('name'),
+            'type': meta.get('type'),
+            'serialization_format': meta.get('serialization_format'),
+            'message_count': entry.get('message_count', 0),
+        })
+    return {
+        'bag': bag_name,
+        'storage_identifier': info.get('storage_identifier'),
+        'version': info.get('version'),
+        'duration_sec': duration_ns / 1e9 if duration_ns else 0,
+        'starting_time_sec': starting_ns / 1e9 if starting_ns else None,
+        'message_count': info.get('message_count'),
+        'topics': topics,
+    }
 
 
 @router.get('/{bag_name}/files')

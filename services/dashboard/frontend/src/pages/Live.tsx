@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useTopics } from '../lib/topics';
 import { blobSocket } from '../lib/ws';
+import { foxgloveStudioUrl } from '../lib/foxglove';
 
 function fmtPct(v: number | null | undefined): string {
   if (v === null || v === undefined || Number.isNaN(v)) return '—';
@@ -65,7 +66,12 @@ export function Live() {
     <section>
       <div className="page-header">
         <h1>Live</h1>
-        <div className={`ws-status ${wsStatus}`}>{wsStatus === 'open' ? '● connected' : '○ disconnected'}</div>
+        <div className="page-header-right">
+          <a className="foxglove-link" href={foxgloveStudioUrl()} target="_blank" rel="noreferrer">
+            Open in Foxglove ↗
+          </a>
+          <div className={`ws-status ${wsStatus}`}>{wsStatus === 'open' ? '● connected' : '○ disconnected'}</div>
+        </div>
       </div>
 
       <div className="telemetry">

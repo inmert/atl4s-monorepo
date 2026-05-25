@@ -17,6 +17,7 @@ Consumed by `dashboard`, by `scripts/bag-record.sh`, and by any future caller ru
 | `GET` | `/api/uploads` | Per-bag status of every directory in `${BAG_DIR}`: `{name, size_bytes, files, mtime, uploaded, in_flight}`. |
 | `POST` | `/api/uploads/{name}` | Force-upload a bag now without waiting for the stable window. 409 if already uploading or uploaded. |
 | `GET` | `/api/bags` | List bags in `gs://${GCS_BUCKET}`: `[{name, size_bytes, size_mib, files, updated}]`. |
+| `GET` | `/api/bags/{name}/metadata` | Parse `metadata.yaml` into a summary `{duration_sec, message_count, topics: [{name, type, message_count}]}`. |
 | `GET` | `/api/bags/{name}/files` | List blobs inside a GCS bag. |
 | `GET` | `/api/bags/{name}/files/{filename}` | Stream-download one file from GCS. |
 | `POST` | `/api/bags/{name}/upload` | Multipart push to GCS; field name `files` (repeatable). |

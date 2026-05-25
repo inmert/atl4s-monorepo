@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Bag, type ReplayStatus } from '../lib/api';
+import { foxgloveStudioUrl } from '../lib/foxglove';
 import { formatDate } from '../lib/format';
 
 const POLL_MS = 2000;
@@ -111,7 +112,9 @@ export function Replay() {
         </div>
         <p className="hint">
           Replays publish recorded topics back onto the DDS bus with their original QoS.
-          Open <Link to="/live">Live</Link> to watch the replayed data come through.
+          Open <Link to="/live">Live</Link> for the in-app view, or{' '}
+          <a href={foxgloveStudioUrl()} target="_blank" rel="noreferrer">Foxglove Studio ↗</a>{' '}
+          for 3D inspection.
         </p>
       </div>
     </section>

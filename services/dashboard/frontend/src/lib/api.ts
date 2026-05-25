@@ -14,6 +14,23 @@ export type BagFile = {
   updated: string | null;
 };
 
+export type BagTopic = {
+  name: string | null;
+  type: string | null;
+  serialization_format: string | null;
+  message_count: number;
+};
+
+export type BagMetadata = {
+  bag: string;
+  storage_identifier: string | null;
+  version: number | null;
+  duration_sec: number;
+  starting_time_sec: number | null;
+  message_count: number | null;
+  topics: BagTopic[];
+};
+
 export type RecordStatus = {
   state: 'idle' | 'recording' | 'stopping';
   name: string | null;
@@ -60,6 +77,7 @@ function bagPath(name: string): string {
 export const api = {
   listBags: () => request<Bag[]>('/api/bags'),
   listFiles: (name: string) => request<BagFile[]>(`${bagPath(name)}/files`),
+  bagMetadata: (name: string) => request<BagMetadata>(`${bagPath(name)}/metadata`),
   deleteBag: async (name: string) => {
     const res = await fetch(bagPath(name), { method: 'DELETE' });
     if (!res.ok) {

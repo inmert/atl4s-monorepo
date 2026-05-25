@@ -6,7 +6,6 @@ trap 'kill $(jobs -p) 2>/dev/null; exit 0' SIGTERM SIGINT
 
 echo "[entrypoint] Starting arducopter (model=JSON, FDM via Gazebo on UDP :9002)..."
 # --model JSON: take physics from the external Gazebo ardupilot_gazebo plugin.
-# --defaults: copter.parm baseline + gazebo-iris.parm tuned for the Gazebo iris.
 # Speedup is omitted on purpose — Gazebo's real_time_factor controls sim time.
 /ardupilot/build/sitl/bin/arducopter \
     --model JSON \
@@ -24,12 +23,17 @@ for i in {1..30}; do
     sleep 1
 done
 
-echo "[entrypoint] Starting MAVProxy, forwarding to ${MAVPROXY_OUT}..."
+echo "[entrypoint] Starting MAVProxy (streamrate=${MAVPROXY_STREAMRATE} Hz), forwarding to ${MAVPROXY_OUT}..."
 # Foreground, NOT --daemon — otherwise mavproxy double-forks, PID 1 exits,
 # and the container restart-loops.
+# --streamrate: rate MAVProxy requests SERIAL0 streams from ArduPilot via
+# MAV_CMD_REQUEST_DATA_STREAM. Drives /mavros/* topic rates downstream.
+# (ArduPilot 4.8 dropped the per-channel SR0_* params for SERIAL0 — the
+# stream-rate path now goes through this CLI flag instead.)
 mavproxy.py \
     --master tcp:127.0.0.1:5760 \
     --out "${MAVPROXY_OUT}" \
+    --streamrate "${MAVPROXY_STREAMRATE}" \
     --non-interactive \
     --logfile /tmp/mavproxy.log &
 

@@ -1,10 +1,11 @@
-"""ATL4S Console — new operator dashboard (logic layer).
+"""ATL4S Console — operator dashboard (logic layer).
 
-Runs as a second uvicorn inside the dashboard container on ``CONSOLE_PORT``
-(default 8090), beside the legacy dashboard on 8089. Features from the legacy
-dashboard are integrated here one at a time; today it owns the login flow and
-serves the SPA. The design layer (the React app under ``console/ui/``) talks to
-this process only over the HTTP/JSON endpoints below.
+Runs natively on the host as the ``atl4s-console`` systemd service on
+``CONSOLE_PORT`` (default 8089). The single human-facing surface for the stack:
+it owns auth and serves the SPA, controls Docker containers, manages the
+deployment registry, and proxies the inspector backend under
+``/api/inspector/*``. The design layer (the React app under ``console/ui/``)
+talks to this process only over the HTTP/JSON endpoints below.
 """
 
 import logging
@@ -14,7 +15,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, containers, deployments
+from . import auth, containers, crackseg, deployments, inspector, pipelines
 from .config import STATIC_DIR
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(name)s: %(message)s')
@@ -25,6 +26,9 @@ app = FastAPI(title='ATL4S Console')
 app.include_router(containers.router)
 app.include_router(containers.ws_router)
 app.include_router(deployments.router)
+app.include_router(inspector.router)
+app.include_router(pipelines.router)
+app.include_router(crackseg.router)
 
 
 class LoginBody(BaseModel):

@@ -88,6 +88,88 @@ export interface DeploymentOptions {
   protocols: string[];
 }
 
+export interface ModelInfo {
+  name: string;
+  ext: string;
+  size_bytes: number;
+  modified: number;
+}
+
+export interface MlInfo {
+  supported: boolean;
+  pipelines: string[];
+  message: string;
+}
+
+// Mesh-level metadata, computed in the viewer once a model loads.
+export interface ModelStats {
+  meshes: number;
+  vertices: number;
+  triangles: number;
+  size: [number, number, number];
+}
+
+export interface RosbagInfo {
+  name: string;
+  size_bytes?: number;
+  size_mib?: number;
+  files?: number;
+  updated?: string;
+}
+
+export interface RosbagTopic {
+  name: string;
+  type: string;
+  message_count: number;
+}
+
+export interface RosbagMeta {
+  duration_sec: number;
+  message_count: number;
+  topics: RosbagTopic[];
+}
+
+export type ReplayState = 'idle' | 'downloading' | 'playing' | 'stopping';
+
+export interface ReplayStatus {
+  state: ReplayState;
+  bag: string | null;
+  started_at?: number | null;
+}
+
+export type PipelineFieldType = 'select' | 'slider' | 'number' | 'string' | 'boolean' | 'color';
+
+export interface PipelineField {
+  key: string;
+  label: string;
+  type: PipelineFieldType;
+  options?: string[];
+  min?: number;
+  max?: number;
+  step?: number;
+  default?: unknown;
+}
+
+export type PipelineStatus = 'running' | 'stopped' | 'not_deployed';
+export type PipelineAction = 'start' | 'stop' | 'restart';
+
+export interface Pipeline {
+  id: string;
+  name: string;
+  container: string;
+  description: string;
+  fields: PipelineField[];
+  status: PipelineStatus;
+  config: Record<string, unknown>;
+}
+
+export interface CrackInfo {
+  running: boolean;
+  device?: string;
+  model_variant?: string;
+  status?: string;
+}
+
 async function jsonOrThrow(res: Response): Promise<unknown> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -192,6 +274,145 @@ export const api = {
           credentials: 'same-origin',
         }),
       );
+    },
+  },
+
+  inspector: {
+    async listModels(): Promise<{ models: ModelInfo[]; allowed_ext?: string[] }> {
+      return jsonOrThrow(
+        await fetch('/api/inspector/models', { credentials: 'same-origin' }),
+      ) as Promise<{ models: ModelInfo[]; allowed_ext?: string[] }>;
+    },
+
+    // XHR (not fetch) so we can report upload progress for large models.
+    uploadModel(file: File, onProgress?: (pct: number) => void): Promise<ModelInfo> {
+      return new Promise((resolve, reject) => {
+        const form = new FormData();
+        form.append('file', file);
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/inspector/models');
+        xhr.withCredentials = true;
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+        };
+        xhr.onload = () => {
+          let data: { detail?: string } = {};
+          try {
+            data = JSON.parse(xhr.responseText);
+          } catch {
+            /* non-JSON response */
+          }
+          if (xhr.status >= 200 && xhr.status < 300) resolve(data as ModelInfo);
+          else reject(new Error(data?.detail || `Upload failed (${xhr.status})`));
+        };
+        xhr.onerror = () => reject(new Error('Upload failed'));
+        xhr.send(form);
+      });
+    },
+
+    async deleteModel(name: string): Promise<void> {
+      await jsonOrThrow(
+        await fetch(`/api/inspector/models/${encodeURIComponent(name)}`, {
+          method: 'DELETE',
+          credentials: 'same-origin',
+        }),
+      );
+    },
+
+    modelFileUrl(name: string): string {
+      return `/api/inspector/models/${encodeURIComponent(name)}/file`;
+    },
+
+    async mlPipelines(): Promise<MlInfo> {
+      return jsonOrThrow(
+        await fetch('/api/inspector/ml/pipelines', { credentials: 'same-origin' }),
+      ) as Promise<MlInfo>;
+    },
+
+    async listRosbags(): Promise<{ supported: boolean; bags: RosbagInfo[] }> {
+      return jsonOrThrow(
+        await fetch('/api/inspector/rosbags', { credentials: 'same-origin' }),
+      ) as Promise<{ supported: boolean; bags: RosbagInfo[] }>;
+    },
+
+    async rosbagMetadata(name: string): Promise<RosbagMeta> {
+      return jsonOrThrow(
+        await fetch(`/api/inspector/rosbags/${encodeURIComponent(name)}/metadata`, {
+          credentials: 'same-origin',
+        }),
+      ) as Promise<RosbagMeta>;
+    },
+
+    async rosbagStatus(): Promise<ReplayStatus> {
+      return jsonOrThrow(
+        await fetch('/api/inspector/rosbags/status', { credentials: 'same-origin' }),
+      ) as Promise<ReplayStatus>;
+    },
+
+    async playRosbag(name: string): Promise<void> {
+      await jsonOrThrow(
+        await fetch(`/api/inspector/rosbags/${encodeURIComponent(name)}/play`, {
+          method: 'POST',
+          credentials: 'same-origin',
+        }),
+      );
+    },
+
+    async stopRosbag(): Promise<void> {
+      await jsonOrThrow(
+        await fetch('/api/inspector/rosbags/stop', { method: 'POST', credentials: 'same-origin' }),
+      );
+    },
+  },
+
+  pipelines: {
+    async list(): Promise<{ pipelines: Pipeline[] }> {
+      return jsonOrThrow(
+        await fetch('/api/pipelines', { credentials: 'same-origin' }),
+      ) as Promise<{ pipelines: Pipeline[] }>;
+    },
+
+    async updateConfig(id: string, config: Record<string, unknown>): Promise<Pipeline> {
+      return jsonOrThrow(
+        await fetch(`/api/pipelines/${encodeURIComponent(id)}/config`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ config }),
+        }),
+      ) as Promise<Pipeline>;
+    },
+
+    async action(id: string, action: PipelineAction): Promise<Pipeline> {
+      return jsonOrThrow(
+        await fetch(`/api/pipelines/${encodeURIComponent(id)}/${action}`, {
+          method: 'POST',
+          credentials: 'same-origin',
+        }),
+      ) as Promise<Pipeline>;
+    },
+  },
+
+  crackseg: {
+    async info(): Promise<CrackInfo> {
+      return jsonOrThrow(
+        await fetch('/api/crackseg/info', { credentials: 'same-origin' }),
+      ) as Promise<CrackInfo>;
+    },
+
+    // POST the rendered frame; get an RGBA crack-mask PNG back.
+    async infer(blob: Blob): Promise<Blob> {
+      const res = await fetch('/api/crackseg/infer', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'image/png' },
+        body: blob,
+      });
+      if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(d.detail || `inference failed (${res.status})`);
+      }
+      return res.blob();
     },
   },
 };

@@ -1,0 +1,38 @@
+# Pipeline registry — services the console's Pipelines page can start/stop and
+# configure. Each entry maps to a container and a config file under
+# console/config/pipelines/{id}.yaml (read by the container at startup;
+# Restart to apply). `fields` drives the config form.
+#
+# field types: select (options) | slider (min/max/step) | number (min/max/step)
+#            | string | boolean | color
+
+- id: crackseg
+  name: CrackSeg
+  container: atl4s-crackseg
+  description: Crack segmentation (UNet) on the L4 GPU. When running, the inspector overlays detected cracks on the model in view.
+  config_file: pipelines/crackseg.yaml
+  fields:
+    - { key: method, label: Method, type: select, options: [color, unet], default: color }
+    - { key: conf_threshold, label: Threshold, type: slider, min: 0, max: 1, step: 0.02, default: 0.5 }
+    - { key: color_blur, label: Color · local window (px), type: number, min: 3, max: 99, step: 2, default: 25 }
+    - { key: color_scale, label: Color · sensitivity scale, type: number, min: 2, max: 80, step: 1, default: 22 }
+    - { key: ignore_dark, label: Ignore background, type: boolean, default: true }
+    - { key: input_size, label: Inference size, type: number, min: 64, max: 1024, step: 16, default: 512 }
+    - { key: weights, label: Weights (unet), type: string, default: dicece }
+    - { key: out_channels, label: Output channels (unet), type: number, min: 1, max: 8, step: 1, default: 2 }
+    - { key: crack_index, label: Crack channel (unet), type: number, min: 0, max: 8, step: 1, default: 1 }
+    - { key: normalize, label: Normalization (unet), type: select, options: [scale, imagenet], default: scale }
+    - { key: overlay_color, label: Overlay colour, type: color, default: '#ff3b30' }
+    - { key: max_alpha, label: Max opacity, type: slider, min: 0, max: 1, step: 0.05, default: 0.7 }
+
+- id: perception-lidar
+  name: Perception · Lidar
+  container: atl4s-perception-lidar
+  description: DBSCAN lidar detector. Publishes /perception/lidar/detections + markers.
+  config_file: pipelines/perception-lidar.yaml
+  fields:
+    - { key: model_variant, label: Model variant, type: select, options: [pointpillars, centerpoint, voxelnet], default: pointpillars }
+    - { key: confidence_threshold, label: Confidence threshold, type: slider, min: 0, max: 1, step: 0.05, default: 0.5 }
+    - { key: input_type, label: Input type, type: select, options: [pointcloud2, laserscan], default: pointcloud2 }
+    - { key: input_topic, label: Input topic, type: string, default: /lidar/points }
+    - { key: enable_tracking, label: Enable tracking, type: boolean, default: false }

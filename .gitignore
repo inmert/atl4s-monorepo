@@ -32,6 +32,8 @@ Thumbs.db
 
 # Recorded bags (large — store in GCS, not git)
 data/bags/
+data/models/
+data/crackseg/
 *.mcap
 *.db3
 *.bag

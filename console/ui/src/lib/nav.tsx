@@ -1,8 +1,9 @@
 import { ReactElement } from 'react';
-import { Activity, Box, Database, LayoutDashboard, Rocket, Settings as SettingsIcon, Workflow, LucideIcon } from 'lucide-react';
+import { Activity, Box, Database, LayoutDashboard, Rocket, ScanEye, Settings as SettingsIcon, Workflow, LucideIcon } from 'lucide-react';
 import { Dashboard } from '../pages/Dashboard';
 import { Containers } from '../pages/Containers';
 import { Deployments } from '../pages/Deployments';
+import { Inspector } from '../pages/Inspector';
 import { Pipelines } from '../pages/Pipelines';
 import { RosbagManager } from '../pages/RosbagManager';
 import { Health } from '../pages/Health';
@@ -21,6 +22,7 @@ export const PRIMARY_NAV: NavItem[] = [
   { path: '', label: 'Dashboard', icon: LayoutDashboard, element: <Dashboard /> },
   { path: 'containers', label: 'Containers', icon: Box, element: <Containers /> },
   { path: 'deployments', label: 'Deployments', icon: Rocket, element: <Deployments /> },
+  { path: 'inspector', label: 'Inspector', icon: ScanEye, element: <Inspector /> },
   { path: 'pipelines', label: 'Pipelines', icon: Workflow, element: <Pipelines /> },
   { path: 'rosbags', label: 'Rosbag Manager', icon: Database, element: <RosbagManager /> },
   { path: 'health', label: 'Health', icon: Activity, element: <Health /> },

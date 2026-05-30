@@ -1,0 +1,13 @@
+method: color
+conf_threshold: 0.84
+color_blur: 25
+color_scale: 22
+ignore_dark: true
+dark_threshold: 0.06
+input_size: 512
+weights: dicece
+out_channels: 2
+crack_index: 1
+normalize: scale
+overlay_color: '#ff3b30'
+max_alpha: 0.7

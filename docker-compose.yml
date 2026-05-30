@@ -145,6 +145,55 @@ services:
       - ./shared/fastdds_profiles.xml:/fastdds_profiles.xml:ro
       - ./data/bags:/data/bags
 
+  # Backend engine for 3D model + (soon) rosbag viewing and live ML. The viewer
+  # UI lives in the console, which proxies here under /api/inspector/*. Bound to
+  # loopback (not browser-facing). No ROS/DDS today, so it skips the x-common
+  # FastDDS mount; GPU + ML deps get added when live ML pipelines land.
+  inspector:
+    build:
+      context: ./services/inspector
+    image: atl4s/inspector:latest
+    container_name: atl4s-inspector
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      INSPECTOR_BIND: ${INSPECTOR_BIND:-127.0.0.1}
+      INSPECTOR_PORT: ${INSPECTOR_PORT:-8091}
+      # rosbag features delegate here for now (loopback; same host net namespace).
+      ROSBAG_MANAGER_URL: ${ROSBAG_MANAGER_URL:-http://127.0.0.1:8086}
+    volumes:
+      - ./data/models:/data/models
+    depends_on:
+      - rosbag-manager
+
+  # Crack-segmentation (UNet, L4 GPU). Controlled from the console Pipelines
+  # page (start/stop/configure); when running, the inspector overlays its
+  # output on the model in view. Loopback-only; the console proxies to it.
+  crackseg:
+    build:
+      context: ./services/crackseg
+    image: atl4s/crackseg:latest
+    container_name: atl4s-crackseg
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      CRACKSEG_BIND: ${CRACKSEG_BIND:-127.0.0.1}
+      CRACKSEG_PORT: ${CRACKSEG_PORT:-8092}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ./console/config:/app/config:ro
+      # Drop your own weights here (TorchScript / pickled module / UNet
+      # state_dict) and set `weights:` in the crackseg config — no rebuild.
+      - ./data/crackseg/weights:/weights:ro
+
 # The console (operator dashboard) is no longer a container — it runs natively
 # on the host as the atl4s-console systemd service, since it manages this very
 # stack (Docker socket, lifecycle) and shouldn't live inside it. See console/.

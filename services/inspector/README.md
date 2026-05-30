@@ -1,12 +1,14 @@
 # inspector
 
-The **backend engine** for 3D model + (soon) rosbag viewing and live ML. It has
-no UI of its own — the viewer lives in the **console**, which proxies here under
+The **backend engine** for the console's 3D-model + rosbag viewer. It has no UI
+of its own — the viewer lives in the **console**, which proxies here under
 `/api/inspector/*`. Bound to **loopback** (`127.0.0.1:8091`); not browser-facing.
+Live defect overlay on the viewed model comes from the separate `crackseg`
+service (also console-proxied).
 
 ```
 console (host :8089)  ──/api/inspector/*──▶  inspector (container, 127.0.0.1:8091)
-   three.js viewer                               model store + ML/rosbag engine
+   three.js viewer                               model store + rosbag delegation
 ```
 
 ## Layout
@@ -16,7 +18,7 @@ services/inspector/
 ├── Dockerfile          python:3.11-slim (no frontend, no ROS)
 ├── entrypoint.sh
 └── backend/
-    ├── main.py             model upload/list/serve/delete; rosbag + ML placeholders
+    ├── main.py             model upload/list/serve/delete; rosbag list/metadata/play (via rosbag-manager); ML placeholder
     └── config.py
 ```
 

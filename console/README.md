@@ -8,26 +8,34 @@ The defining rule: the **logic layer** (FastAPI) and the **design layer** (React
 
 ```
 console/
-├── api/          logic layer — FastAPI (auth, containers, deployments, serves the SPA)
+├── api/          logic layer — FastAPI (serves the SPA + the routes below)
 │   ├── main.py       routes + SPA fallback
 │   ├── auth.py       session login (signed httpOnly cookie)
 │   ├── containers.py Docker control: list / inspect / logs / stats / start·stop·restart / env edit
 │   ├── deployments.py robot/vehicle/sensor registry (CRUD → config/deployments.yaml)
+│   ├── pipelines.py  pipeline registry — start/stop/restart + schema config (config/pipelines.yaml)
+│   ├── inspector.py  streaming proxy to the inspector backend (/api/inspector/*)
+│   ├── crackseg.py   proxy to the crackseg backend (/api/crackseg/{info,infer})
 │   └── config.py     host-relative paths (ui/dist, config/)
 ├── ui/           design layer — React + Vite + TS (built to ui/dist)
 │   └── src/
 │       ├── lib/api.ts    the ONLY seam to the backend (fetch lives here)
 │       ├── lib/…         auth / theme / nav / deployments helpers
 │       ├── styles/       tokens.css (typeui "dashboard" system) + app.css
-│       ├── components/   Drawer, Modal, StatusBadge, LiveLogs, …
-│       └── pages/        Login, Shell, Containers, Deployments, … (placeholders for the rest)
+│       ├── components/   Drawer, Modal, StatusBadge, LiveLogs, Viewer3D, PipelineDrawer, …
+│       └── pages/        Login, Shell, Containers, Deployments, Inspector, Pipelines, … (placeholders for the rest)
 ├── config/       runtime config (read/written by the console)
 │   ├── deployments.yaml                  deployment registry
-│   └── pipelines/perception-lidar.yaml   (also bind-mounted RO into perception-lidar)
+│   ├── pipelines.yaml                    pipeline registry (Pipelines page)
+│   └── pipelines/{perception-lidar,crackseg}.yaml   per-pipeline config (bind-mounted RO into those containers)
 ├── requirements.txt
 ├── deploy/atl4s-console.service.template   systemd unit (installer fills in paths)
 └── scripts/      build-ui.sh · setup.sh · run.sh · install-service.sh
 ```
+
+## Pages
+
+**Containers** (control + live logs/stats), **Deployments** (robot/sensor registry), **Inspector** (three.js 3D-model viewer + rosbag browser, with the `crackseg` defect overlay — proxies the loopback `inspector`/`crackseg`/`rosbag-manager` backends so 8089 stays the only browser-facing port), **Pipelines** (start/stop/configure pipeline containers via the Docker socket). Dashboard / Rosbag Manager / Health / Settings are placeholders.
 
 ## Why on the host
 

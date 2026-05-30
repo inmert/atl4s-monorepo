@@ -27,11 +27,15 @@ Docker Compose with profiles. `--profile sim` enables SITL; production omits the
 
 All containers use `network_mode: host`. DDS discovery and same-host UDP work without per-service port maps. When the Orin Nano is added, it forwards MAVLink to the VM's external IP:14550. ROS topics over WAN will be bridged via Zenoh (`zenoh-bridge-ros2dds`) once sensor topics from the Orin are in scope; pure MAVLink telemetry needs no bridge.
 
-## Operator UI and bag plane
+## Operator UI
 
-Two services own the human-facing and storage planes; the boundary between them is the bag plane:
+The single human-facing surface is the **`console`** — and it **runs on the host**, not in a container, because it manages this very stack (Docker socket, container lifecycle) and must outlive `docker compose down`. It's the `atl4s-console` systemd service on TCP **8089** (FastAPI + React, form-login session auth). It replaced the retired in-container `dashboard`.
 
-- **`dashboard`** — single human-facing surface on TCP 8089 (HTTP Basic). React + Vite + TS frontend + FastAPI/rclpy backend in one container. Streams live ROS topics over `/ws/topics` (curated mavros + atl4s set, with dynamic discovery of `/perception/*` and `/fusion/*`) and JPEG frames over `/ws/camera`. Proxies every bag-plane action to `rosbag-manager` under `/api/*`. Owns no state, runs no models. 3D visualisation is delegated to a Foxglove Studio deep link.
-- **`rosbag-manager`** — HTTP API for every bag-plane action: record start/stop/status, watcher + GCS upload, GCS browser (list / files / metadata / download / multipart upload / delete), and replay via `ros2 bag play`. Binds `127.0.0.1:8086` (loopback only; reachable from the dashboard, from `scripts/*`, and from any future service on the host).
+The console is the **only browser-facing port**. Heavy backends bind loopback and the console proxies them same-origin (gated by the session cookie):
 
-This consolidates what would otherwise be six separate services (live backend, browser frontend, bag browser, bag record, bag uploader, bag replay) into two with a clean line: humans hit `dashboard`, bag operations go through `rosbag-manager`. Foxglove Studio stays available for ad-hoc development.
+- **`console`** (host, :8089) — Containers (control + live logs/stats over WS), Deployments (robot/sensor registry), Inspector (three.js 3D-model + rosbag viewer with the `crackseg` defect overlay), Pipelines (start/stop/configure pipeline containers via the Docker socket).
+- **`rosbag-manager`** (loopback :8086) — record / watcher+GCS-upload / GCS browser / replay (`ros2 bag play`). Proxied by the console and the Inspector's rosbag controls.
+- **`inspector`** (loopback :8091) — stores/serves uploaded 3D models; delegates rosbag ops to `rosbag-manager`. The console serves the three.js viewer.
+- **`crackseg`** (loopback :8092, GPU) — surface-defect inference whose mask the Inspector overlays on the model in view.
+
+Foxglove Studio (TCP 8765) stays available for ad-hoc ROS visualisation.

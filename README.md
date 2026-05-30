@@ -32,7 +32,9 @@ atl4s-monorepo/
 │   ├── foxglove/             ROS 2 topics → WebSocket on TCP 8765
 │   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
 │   ├── perception-lidar/     DBSCAN lidar detector (3D PointCloud2 or 2D LaserScan input); publishes /perception/lidar/detections + /perception/lidar/markers
-│   └── rosbag-manager/       HTTP API for bag-plane ops: record / upload / GCS browser / replay (loopback 127.0.0.1:8086)
+│   ├── rosbag-manager/       HTTP API for bag-plane ops: record / upload / GCS browser / replay (loopback 127.0.0.1:8086)
+│   ├── inspector/            Backend for the console's 3D-model + rosbag viewer (loopback 127.0.0.1:8091)
+│   └── crackseg/             Surface-defect inference (GPU) overlaid on the viewed model (loopback 127.0.0.1:8092)
 ├── shared/
 │   ├── fastdds_profiles.xml  shared FastDDS XML
 │   └── atl4s_msgs/           ament_cmake message package (LidarDetection, LidarDetectionArray)
@@ -83,6 +85,8 @@ See [HANDOFF.md](HANDOFF.md) for the working context and open items.
 | `commander` | always | Autonomy node. Low-battery latch → `set_mode RTL`. |
 | `perception-lidar` | always | DBSCAN + per-class shape priors on a configurable lidar input (`/lidar/points` PointCloud2 for 3D, `/lidar/scan` LaserScan for 2D). Publishes `atl4s_msgs/LidarDetectionArray` on `/perception/lidar/detections` and `visualization_msgs/MarkerArray` on `/perception/lidar/markers` for Foxglove Studio's 3D panel. Config from `console/config/pipelines/perception-lidar.yaml`. First user of `shared/atl4s_msgs/`. |
 | `rosbag-manager` | always | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser, replay via `ros2 bag play`. Loopback on `127.0.0.1:8086`. Consumed by the console, `scripts/bag-record.sh`, and any future host caller. |
+| `inspector` | always | Backend engine for the console's Inspector page — stores/serves uploaded 3D models, and delegates rosbag list/metadata/play to `rosbag-manager`. Loopback `127.0.0.1:8091`; the console proxies it under `/api/inspector/*` and serves the three.js viewer. |
+| `crackseg` | always | Surface-defect inference (L4 GPU) whose mask the Inspector overlays on the model in view. `method: color` (CIELAB colour-discrepancy, no weights) or `unet` (swappable UNet/TorchScript/state_dict in `./data/crackseg/weights`). Loopback `127.0.0.1:8092`; configured from the Pipelines page. |
 | `perception-detector` | planned | Object detection on the L4 GPU (first GPU service). |
 | `perception-segmenter` | planned | Segmentation. |
 | `perception-fault` | planned | Fault / anomaly detection. |
@@ -93,6 +97,8 @@ See [HANDOFF.md](HANDOFF.md) for the working context and open items.
 ## Console (operator dashboard)
 
 The operator UI lives in [`console/`](console/) and runs **natively on the host** as the `atl4s-console` systemd service on TCP **8089** — not a container, since it manages this very stack (Docker socket, container lifecycle). Form login reuses `BAG_WEB_USER` / `BAG_WEB_PASS`. FastAPI backend (`console/api`) + React/Vite frontend (`console/ui`, served from `ui/dist`).
+
+Live pages: **Containers** (control + live logs/stats), **Deployments** (robot/sensor registry), **Inspector** (three.js 3D-model + rosbag viewer with the `crackseg` defect overlay), **Pipelines** (start/stop/configure pipeline containers). It proxies the loopback `inspector`, `crackseg`, and `rosbag-manager` backends, so 8089 is the only browser-facing port.
 
 ```bash
 cd console

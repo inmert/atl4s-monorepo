@@ -65,7 +65,7 @@ Runtime config lives at `console/config/pipelines/perception-lidar.yaml` (bind-m
 
 ## Console
 
-The operator dashboard now runs on the host (`console/`, the `atl4s-console` systemd service) and **does not bridge ROS yet** — it talks only to the Docker daemon (Containers page) and its own YAML registries (Deployments). The retired `services/dashboard` container subscribed to ROS via `rclpy` (robot-registry telemetry, dynamic `/perception/*` + `/fusion/*` discovery, on-demand sampling); the console will reintroduce that using the host's `rclpy` when its telemetry pages land. See the NaN/byte JSON gotchas in [HANDOFF.md](../HANDOFF.md) before wiring it.
+The operator dashboard now runs on the host (`console/`, the `atl4s-console` systemd service) and **does not bridge ROS itself** — it talks to the Docker daemon (Containers, Pipelines), its own YAML registries (Deployments), and the loopback `inspector` / `crackseg` / `rosbag-manager` backends it proxies. The one path that touches the bus is the Inspector's rosbag **play**, which calls `rosbag-manager` to `ros2 bag play` onto the ROS graph (the console never subscribes). The retired `services/dashboard` container subscribed to ROS via `rclpy` (robot-registry telemetry, dynamic `/perception/*` + `/fusion/*` discovery, on-demand sampling); the console will reintroduce that using the host's `rclpy` when its telemetry pages land. See the NaN/byte JSON gotchas in [HANDOFF.md](../HANDOFF.md) before wiring it.
 
 ## rosbag-manager
 

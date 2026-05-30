@@ -54,9 +54,9 @@ atl4s-monorepo/
 ├── console/                  Operator dashboard — runs on the HOST as the
 │   │                         atl4s-console systemd service (TCP 8089), NOT a
 │   │                         container. Replaced services/dashboard.
-│   ├── api/                  FastAPI logic layer (auth, containers, deployments)
+│   ├── api/                  FastAPI logic layer (auth, containers, deployments, pipelines, inspector + crackseg proxies)
 │   ├── ui/                   React/Vite design layer (built to ui/dist)
-│   ├── config/              deployments.yaml + pipelines/{id}.yaml (RW; pipelines/ also bind-mounted RO into perception-lidar)
+│   ├── config/              deployments.yaml + pipelines.yaml registry + pipelines/{id}.yaml (RW; pipelines/ bind-mounted RO into perception-lidar + crackseg)
 │   ├── deploy/ + scripts/    systemd unit template + setup/run/install scripts
 │   └── requirements.txt
 ├── services/
@@ -67,7 +67,9 @@ atl4s-monorepo/
 │   ├── foxglove/             ROS 2 topics → WebSocket on TCP 8765
 │   ├── commander/            Autonomy node: telemetry in, MAVROS commands out
 │   ├── perception-lidar/     DBSCAN-based lidar detector — first user of `shared/atl4s_msgs/`
-│   └── rosbag-manager/       HTTP API for bag-plane ops: record / upload / GCS browser / replay (loopback 127.0.0.1:8086)
+│   ├── rosbag-manager/       HTTP API for bag-plane ops: record / upload / GCS browser / replay (loopback 127.0.0.1:8086)
+│   ├── inspector/            Backend engine for the console's 3D-model + rosbag viewer (loopback 127.0.0.1:8091)
+│   └── crackseg/             Surface-defect inference (GPU) overlaid on the viewed model (loopback 127.0.0.1:8092)
 ├── shared/
 │   ├── fastdds_profiles.xml  shared FastDDS XML (see gotchas)
 │   └── atl4s_msgs/           ament_cmake message package (`LidarDetection`, `LidarDetectionArray` today). Built into the perception-lidar and foxglove images.
@@ -112,7 +114,9 @@ atl4s-monorepo/
 - Commander: low-battery → `set_mode RTL` verified end-to-end (forced via `BATTERY_LOW_THRESHOLD=1.0`).
 - perception-lidar: subscribes to a configurable lidar input — `/lidar/points` (`sensor_msgs/PointCloud2` for 3D lidars, default) or `/lidar/scan` (`sensor_msgs/LaserScan` for 2D planar lidars) — selected via the `input_type` config field. Publishes `/perception/lidar/detections` (`atl4s_msgs/LidarDetectionArray`) for machine consumption and `/perception/lidar/markers` (`visualization_msgs/MarkerArray`) for Foxglove Studio's 3D panel (CUBE per detection, TEXT_VIEW_FACING label, DELETEALL prefix). Runtime config from `config/pipelines/perception-lidar.yaml`. DBSCAN + per-class shape priors (aircraft, tank); height is skipped from scoring when the input is 2D so the same priors work for both modalities. No live lidar source on the VM; verified end-to-end against `scripts/publish-fake-lidar.sh` (3D, ~5 Hz `PointCloud2`) and `scripts/publish-fake-scan.sh` (2D, ~5 Hz 720-ray `LaserScan`) — detections + markers stream at the input rate.
 - rosbag-manager: HTTP API on `127.0.0.1:8086` for record / upload / GCS browser / replay. Smoke tested end-to-end via `./scripts/bag-record.sh` — record subprocess + watcher upload + GCS confirmed; replay downloads from GCS, plays, and cleans up `${REPLAY_DIR}`.
-- console (operator dashboard, **runs on the host** as the `atl4s-console` systemd service on `:8089`): a fresh rebuild replacing the deleted `services/dashboard` container. Form login (signed httpOnly session cookie) reusing `BAG_WEB_USER` / `BAG_WEB_PASS`; typeui.sh "dashboard" design system (dark cloud-platform, light/dark toggle, IBM Plex Sans). Clean logic/design split — FastAPI `console/api/` is the only seam to the React `console/ui/`. Live pages: **Containers** (3-col cards; per-container detail drawer with live log stream + CPU/mem stats over WebSocket, start/stop/restart, log export, and **environment-variable view/edit** via container recreate), **Deployments** (CRUD registry of robots / vehicles / sensors — sim or real — with connection spec `protocol` + `host:port`; status derived from linked-container liveness; Gazebo Drone + Orin Drone seeded in `console/config/deployments.yaml`). Placeholder pages: Dashboard, Pipelines, Rosbag Manager, Health, Settings — to be wired one at a time. Talks to Docker via the local socket as `arachnid` (no mounted socket). Setup: `console/scripts/setup.sh` then `install-service.sh`; logs via `journalctl -u atl4s-console -f`.
+- console (operator dashboard, **runs on the host** as the `atl4s-console` systemd service on `:8089`): a fresh rebuild replacing the deleted `services/dashboard` container. Form login (signed httpOnly session cookie) reusing `BAG_WEB_USER` / `BAG_WEB_PASS`; typeui.sh "dashboard" design system (dark cloud-platform, light/dark toggle, IBM Plex Sans). Clean logic/design split — FastAPI `console/api/` is the only seam to the React `console/ui/`. Live pages: **Containers** (3-col cards; per-container detail drawer with live log stream + CPU/mem stats over WebSocket, start/stop/restart, log export, and **environment-variable view/edit** via container recreate), **Deployments** (CRUD registry of robots / vehicles / sensors — sim or real — with connection spec `protocol` + `host:port`; status derived from linked-container liveness; Gazebo Drone + Orin Drone seeded in `console/config/deployments.yaml`), **Inspector** (three.js FBX/GLB viewer with Blender-style middle-mouse controls + mesh/file metadata; rosbag browser — list / metadata / play-stop via the `inspector` backend; **Cracks** toggle overlays `crackseg` output on the model, captured on camera-settle), **Pipelines** (registry-driven cards — start/stop/restart any pipeline container via the Docker socket + a schema-generated config form persisted to `console/config/pipelines/{id}.yaml`; `crackseg` and `perception-lidar` declared). Placeholder pages: Dashboard, Rosbag Manager, Health, Settings — to be wired one at a time. Talks to Docker via the local socket as `arachnid` (no mounted socket). Setup: `console/scripts/setup.sh` then `install-service.sh`; logs via `journalctl -u atl4s-console -f`.
+- inspector (loopback `127.0.0.1:8091`): backend engine for the console's viewer (no UI of its own — the console proxies it under `/api/inspector/*`). Stores + serves uploaded 3D models (`/data/models`); rosbag list / metadata / play-stop delegate to `rosbag-manager`. `FROM python:3.11-slim` (no ROS). The console serves the three.js viewer.
+- crackseg (loopback `127.0.0.1:8092`, L4 GPU): surface-defect inference whose RGBA mask the inspector overlays on the model in view. Two interchangeable methods (`method` config): `color` (CIELAB local colour-discrepancy, no weights — flags marks that differ in colour) and `unet` (swappable UNet / TorchScript / state_dict from a mounted weights dir). CUDA torch base. Started/stopped/configured from the Pipelines page.
 
 Verify:
 
@@ -242,6 +246,10 @@ The dashboard sanitizes in `services/dashboard/backend/topics.py:_sanitize_for_j
 
 The console uses a **signed httpOnly session cookie** (not HTTP Basic) — `console/api/auth.py`. The cookie is set by `POST /api/auth/login` and rides along on same-origin requests, including the `/ws/containers/*` upgrade, so `auth.check_websocket()` validates it from `ws.cookies`. Because it's set after login, open the SPA and sign in before any direct `/ws/*` test from a browser; for curl, capture the cookie jar from the login call and pass it on the WS request.
 
+### Loopback backends behind the console proxy
+
+`inspector` (`:8091`), `crackseg` (`:8092`) and `rosbag-manager` (`:8086`) bind **loopback only** and are never exposed to browsers. The console (a host process, so it reaches `127.0.0.1`) proxies them under `/api/inspector/*`, `/api/crackseg/*`, `/api/pipelines` — same-origin and gated by the session cookie, with `httpx` streaming uploads/downloads. So: the only browser-facing port is the console's 8089; new such services follow the same pattern (loopback container + a console proxy module + a UI page). The console serves the heavy UI (e.g. the three.js viewer); the backend stays a thin engine, GPU-ready (crackseg reserves the L4 like `gazebo`).
+
 ## Service inventory
 
 | # | Service | Status | Profile | Notes |
@@ -255,12 +263,14 @@ The console uses a **signed httpOnly session cookie** (not HTTP Basic) — `cons
 | 7 | `rosbag-manager` | running | always | HTTP API for every bag-plane operation: record start/stop/status, watcher + GCS upload, GCS browser (list / upload / download / delete), and replay via `ros2 bag play`. Binds `127.0.0.1:8086` (loopback only). `FROM ros:humble`. Consumed by the console, `scripts/bag-record.sh`, and any future caller on the host. |
 | — | `console` | running | host service | **Not a container.** Operator dashboard on the host as the `atl4s-console` systemd service (TCP 8089). FastAPI (`console/api`) + React (`console/ui`). Form login (session cookie) reusing `BAG_WEB_USER`/`BAG_WEB_PASS`. Live: **Containers** (logs/stats streams, start·stop·restart, log export, env edit) and **Deployments** (robot/sensor registry). See [console/README.md](console/README.md). |
 | 8 | `perception-lidar` | running (no input yet) | always | First perception service + first user of `shared/atl4s_msgs/`. Subscribes to the configured lidar input — `/lidar/points` (`sensor_msgs/PointCloud2`) or `/lidar/scan` (`sensor_msgs/LaserScan`) per `input_type`. Publishes `/perception/lidar/detections` (`atl4s_msgs/LidarDetectionArray`) + `/perception/lidar/markers` (`visualization_msgs/MarkerArray`, rendered by Foxglove Studio's 3D panel). Classical scaffold today: DBSCAN cluster → AABB → per-class shape priors (aircraft = elongated + flat, tank = compact + cubic); height is skipped from scoring for 2D inputs. Runtime config read from `console/config/pipelines/perception-lidar.yaml` (bind-mounted RO). `_classify` / `_score` in `lidar_detector.py` are the swap-in points for a learned model later. No live lidar source on the VM today; use `scripts/publish-fake-lidar.sh` (3D PointCloud2) or `scripts/publish-fake-scan.sh` (2D LaserScan) to drive synthetic frames. |
-| 10 | `perception-detector` | planned | — | YOLO on `/camera/image`, L4 GPU. |
-| 11 | `perception-segmenter` | planned | — | Segmentation. |
-| 12 | `perception-fault` | planned | — | Fault / anomaly detection. |
-| 13 | `fusion` | planned | — | Combines perception + pose into tracks / events. |
-| 14 | `event-publisher` | planned | — | Application events → GCP Pub/Sub. |
-| 15 | `ingestion` | planned | — | Zenoh bridge for ROS topics over WAN from the Orin (last). |
+| 9 | `inspector` | running | always | Backend engine for the console's 3D-model + rosbag viewer. Loopback `127.0.0.1:8091`; the console proxies `/api/inspector/*` and serves the three.js UI. Stores uploaded models in `/data/models`; rosbag list/metadata/play delegate to `rosbag-manager`. `FROM python:3.11-slim` (no ROS). |
+| 10 | `crackseg` | running | always | Surface-defect inference (L4 GPU) overlaid on the inspector model. Loopback `127.0.0.1:8092`. `method: color` (CIELAB colour-discrepancy, no weights) or `unet` (swappable UNet / TorchScript / state_dict via `./data/crackseg/weights`). Start/stop/configure from the Pipelines page. |
+| 11 | `perception-detector` | planned | — | YOLO on `/camera/image`, L4 GPU. |
+| 12 | `perception-segmenter` | planned | — | Segmentation. |
+| 13 | `perception-fault` | planned | — | Fault / anomaly detection. |
+| 14 | `fusion` | planned | — | Combines perception + pose into tracks / events. |
+| 15 | `event-publisher` | planned | — | Application events → GCP Pub/Sub. |
+| 16 | `ingestion` | planned | — | Zenoh bridge for ROS topics over WAN from the Orin (last). |
 
 ## Topic contracts
 
@@ -273,7 +283,8 @@ See [docs/ros-topics.md](docs/ros-topics.md). Stable namespaces:
 
 ## Open items
 
-1. **Console (new operator dashboard) — in progress.** The old `services/dashboard` container was deleted and replaced by `console/`, running on the **host** as the `atl4s-console` systemd service (TCP 8089; FastAPI + React, typeui "dashboard" design, form-login session auth). Done: login, **Containers** (live log/stats streams, start·stop·restart, log export, env view/edit via recreate), **Deployments** (robot/vehicle/sensor registry, CRUD, container-derived status). Remaining pages to wire one at a time: **Dashboard** (fleet overview), **Pipelines** (perception/fusion lifecycle + config — port the old YAML registry + `config/pipelines/{id}.yaml` form), **Rosbag Manager** (proxy to `rosbag-manager` on `127.0.0.1:8086`), **Health** (containers + topic liveness), **Settings**. Telemetry/ROS (live topics, camera, map) will reuse the host's `rclpy` — see the NaN/byte gotchas above.
+1. **Console (operator dashboard) — in progress.** Host `atl4s-console` systemd service (TCP 8089; FastAPI + React, form-login session auth). Done: login, **Containers**, **Deployments**, **Inspector** (3D-model + rosbag viewer with the `crackseg` defect overlay), **Pipelines** (start/stop/restart + schema config form over the Docker socket). Remaining pages to wire one at a time: **Dashboard** (fleet overview), **Rosbag Manager** (the Inspector already browses/plays bags; this page would add record/upload), **Health** (containers + topic liveness), **Settings**. Telemetry/ROS (live topics, camera, map) will reuse the host's `rclpy` — see the NaN/byte gotchas above.
+   - **crackseg defect model.** Committed today is `method: color` (CIELAB colour-discrepancy) + a swappable `unet`. The colour method over-fires on textured/multi-colour assets; a CarDD YOLOv11 vehicle-damage model (Ultralytics) was prototyped as a better fit and can be re-added as a `yolo` method. The cleanest path for a specific asset is a model trained for it, dropped into `./data/crackseg/weights` (TorchScript / state_dict) — no rebuild.
 2. **Real lidar input + learned detector for `perception-lidar`.** The service is wired and running today (`4d1408a`) with a DBSCAN + geometric-prior scaffold. Two follow-ups when the data arrives:
     - **Input source.** No live lidar publishes `/lidar/points` on the VM yet. Synthetic frames via `scripts/publish-fake-lidar.sh` validate the wiring. Real options: (a) Orin's lidar via the future `ingestion` service (Zenoh), (b) revisit the parked Gazebo gpu_lidar attempt with a lighter ray budget, (c) replay a real lidar bag in.
     - **Learned model.** Replace `_classify` / `_score` in `services/perception-lidar/lidar_detector.py` with a CUDA-backed PointPillars / CenterPoint / VoxelNet inference path (the config `model_variant` already selects between them; today it logs a warning that the value is a no-op). First use of the L4 GPU for inference. Needs aircraft/tank training data, since public KITTI/nuScenes checkpoints target car/pedestrian/cyclist instead.

@@ -1,0 +1,23 @@
+# systemd unit template for the ATL4S Console. install-service.sh substitutes
+# @USER@ / @CONSOLE_DIR@ / @REPO_DIR@ and writes it to
+# /etc/systemd/system/atl4s-console.service.
+
+[Unit]
+Description=ATL4S Console — operator dashboard for the ATL4S stack
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@CONSOLE_DIR@
+# Provides BAG_WEB_USER / BAG_WEB_PASS (same credentials as the stack).
+EnvironmentFile=@REPO_DIR@/.env
+Environment=CONSOLE_BIND=0.0.0.0
+Environment=CONSOLE_PORT=8089
+ExecStart=@CONSOLE_DIR@/.venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8089
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

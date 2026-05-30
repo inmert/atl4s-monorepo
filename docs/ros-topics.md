@@ -46,7 +46,7 @@ There is no dedicated health topic. The dashboard owns health: per-container sta
 | `/perception/lidar/detections` | `atl4s_msgs/LidarDetectionArray` | out | Per-frame detections. Each `LidarDetection` carries `class_id` (e.g. "aircraft", "tank", "other"), `score` (0..1), `center` (Point), `size` (Vector3 = length / width / height), `track_id` (int32, 0 when tracking is off). Header frame matches the input message's frame. For 2D LaserScan inputs, `size.z` is always 0. |
 | `/perception/lidar/markers` | `visualization_msgs/MarkerArray` | out | Foxglove-ready visualisation of the same detections. Each frame begins with a `DELETEALL` marker (so old detections don't linger), followed by one `CUBE` and one `TEXT_VIEW_FACING` marker per surviving detection. Class is colour-coded (aircraft = orange, tank = red, other = grey). Marker frame matches the detection frame. |
 
-Configured + lifecycle-controlled from the dashboard Pipelines page. Runtime config lives at `services/dashboard/config/pipelines/perception-lidar.yaml`.
+Runtime config lives at `console/config/pipelines/perception-lidar.yaml` (bind-mounted read-only into the container). Lifecycle is controllable from the console; a dedicated Pipelines page is planned.
 
 ## Perception (planned)
 
@@ -63,15 +63,9 @@ Configured + lifecycle-controlled from the dashboard Pipelines page. Runtime con
 | `/fusion/tracks` | `atl4s_msgs/TrackArray` | fusion | Tracked entities in world frame |
 | `/atl4s/events` | `atl4s_msgs/Event` | fusion | Events for downstream consumers |
 
-## Dashboard
+## Console
 
-The `dashboard` service is a sink — it subscribes and publishes nothing of its own. Subscriptions come from three sources:
-
-| Source | Topics |
-|---|---|
-| Robot registry (`services/dashboard/config/robots.yaml`) | Per-robot `state` / `battery` / `imu` / `gps` (telemetry mapping) and `camera` (JPEG fan-out on `/ws/camera/{robot_id}`). Adding a robot to the YAML auto-subscribes its topics on the next dashboard restart. |
-| Dynamic discovery (5 s rescan) | Any topic under `/perception/*` or `/fusion/*` whose type can be resolved via `rosidl_runtime_py.utilities.get_message()`. Pipelines page. |
-| On-demand sampling | Anything else the user clicks on in the ROS page. The first sample of an unsubscribed topic creates a Best-Effort subscription that's kept open for the process lifetime. |
+The operator dashboard now runs on the host (`console/`, the `atl4s-console` systemd service) and **does not bridge ROS yet** — it talks only to the Docker daemon (Containers page) and its own YAML registries (Deployments). The retired `services/dashboard` container subscribed to ROS via `rclpy` (robot-registry telemetry, dynamic `/perception/*` + `/fusion/*` discovery, on-demand sampling); the console will reintroduce that using the host's `rclpy` when its telemetry pages land. See the NaN/byte JSON gotchas in [HANDOFF.md](../HANDOFF.md) before wiring it.
 
 ## rosbag-manager
 

@@ -43,3 +43,6 @@ data/bags/
 *.log
 logs/
 .claude/
+
+# TS incremental build info
+*.tsbuildinfo

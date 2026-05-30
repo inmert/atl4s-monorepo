@@ -119,10 +119,10 @@ services:
       LIDAR_CONFIG: /app/config/pipelines/perception-lidar.yaml
     # Same volume-merge trap as elsewhere; re-declare the fastdds mount
     # and add a read-only bind on the pipeline config dir so the service
-    # reads the same file the dashboard writes.
+    # reads the same file the console writes.
     volumes:
       - ./shared/fastdds_profiles.xml:/fastdds_profiles.xml:ro
-      - ./services/dashboard/config:/app/config:ro
+      - ./console/config:/app/config:ro
 
   rosbag-manager:
     <<: *common
@@ -145,35 +145,6 @@ services:
       - ./shared/fastdds_profiles.xml:/fastdds_profiles.xml:ro
       - ./data/bags:/data/bags
 
-  dashboard:
-    <<: *common
-    build:
-      # Repo root so the Dockerfile can pick up shared/atl4s_msgs/. The
-      # backend's rclpy bridge needs the type installed to resolve
-      # atl4s_msgs/* topics in /api/ros/topics and /ws/ros/sample.
-      context: .
-      dockerfile: services/dashboard/Dockerfile
-    image: atl4s/dashboard:latest
-    container_name: atl4s-dashboard
-    environment:
-      <<: *shared-env
-      DASHBOARD_BIND: ${DASHBOARD_BIND:-0.0.0.0}
-      DASHBOARD_PORT: ${DASHBOARD_PORT:-8089}
-      BAG_WEB_USER: ${BAG_WEB_USER:-}
-      BAG_WEB_PASS: ${BAG_WEB_PASS:-}
-      ROSBAG_MANAGER_URL: ${ROSBAG_MANAGER_URL:-http://127.0.0.1:8086}
-      ROBOTS_CONFIG: /app/config/robots.yaml
-    # YAML <<: merge does not deep-merge lists; re-declare the x-common
-    # fastdds mount alongside the dashboard's own binds. The config dir is
-    # mounted read-write so the dashboard can persist per-pipeline runtime
-    # configs (config/pipelines/{id}.yaml) when the user clicks Save in the
-    # Pipelines form. docker.sock is mounted read-only for per-container
-    # health (Health page + nav badge); this gives the dashboard container
-    # root-equivalent power over the host — acceptable behind HTTP Basic +
-    # closed firewall.
-    volumes:
-      - ./shared/fastdds_profiles.xml:/fastdds_profiles.xml:ro
-      - ./services/dashboard/config:/app/config
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    depends_on:
-      - rosbag-manager
+# The console (operator dashboard) is no longer a container — it runs natively
+# on the host as the atl4s-console systemd service, since it manages this very
+# stack (Docker socket, lifecycle) and shouldn't live inside it. See console/.

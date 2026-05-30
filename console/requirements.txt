@@ -1,0 +1,7 @@
+# Console backend (host Python venv). Versions match what the deleted
+# dashboard image used. uvicorn[standard] pulls in websockets for the live
+# log/stats streams.
+fastapi==0.115.5
+uvicorn[standard]==0.32.0
+pyyaml==6.0.2
+docker==7.1.0

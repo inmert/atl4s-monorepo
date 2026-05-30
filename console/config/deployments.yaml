@@ -1,0 +1,35 @@
+- id: gazebo-drone
+  name: Gazebo Drone
+  type: drone
+  mode: simulator
+  protocol: mavlink
+  host: 127.0.0.1
+  port: 14550
+  description: Iris quadcopter in Gazebo Harmonic, ArduCopter SITL bridged to ROS
+    via MAVROS.
+  containers:
+  - atl4s-gazebo
+  - atl4s-sitl
+  - atl4s-mavros
+  telemetry:
+    state: /mavros/state
+    battery: /mavros/battery
+    imu: /mavros/imu/data
+    gps: /mavros/global_position/global
+    camera: /camera/image
+- id: orin-drone
+  name: Orin Drone
+  type: drone
+  mode: real
+  protocol: mavlink
+  host: ''
+  port: 14550
+  description: Jetson Orin Nano drone. Offline until field integration; forwards MAVLink
+    to the VM on UDP 14550.
+  containers: []
+  telemetry:
+    state: /orin/mavros/state
+    battery: /orin/mavros/battery
+    imu: /orin/mavros/imu/data
+    gps: /orin/mavros/global_position/global
+    camera: /orin/camera/image

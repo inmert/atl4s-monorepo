@@ -91,11 +91,11 @@ The image colcon-builds `atl4s_msgs` into `/workspace/install/`; the entrypoint 
 
 Python deps (CPU only today): numpy, scikit-learn (DBSCAN), pyyaml. ~700 MB image.
 
-## Container ↔ dashboard contract
+## Container ↔ console contract
 
-The dashboard's Pipelines page expects this service to:
+The console's Pipelines page (planned) expects this service to:
 - be named `atl4s-perception-lidar`,
-- bind-mount `services/dashboard/config/pipelines/` so it reads the same `perception-lidar.yaml` the dashboard writes,
-- publish `/perception/lidar/detections` and `/perception/lidar/markers` (both auto-discovered by the dashboard's topic bridge under `/perception/*`).
+- bind-mount `console/config/pipelines/` (read-only) so it reads the same `perception-lidar.yaml` the console writes,
+- publish `/perception/lidar/detections` and `/perception/lidar/markers`.
 
-When the container is up and running, the dashboard's Pipelines card flips from "Not deployed" to "Running" and Start/Stop/Restart all work via the docker socket.
+Lifecycle (Start/Stop/Restart) works via the Docker socket; today it's controllable from the console's Containers page, with a dedicated Pipelines page to follow.

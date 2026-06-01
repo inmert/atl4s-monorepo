@@ -1,0 +1,45 @@
+# ARACHNID mesh-worker — Cloud Run service that receives Pub/Sub push
+# notifications and builds Poisson meshes from scan bags.
+#
+# Base: python:3.11-slim (Debian bookworm). open3d + pyrealsense2 both
+# ship manylinux x86_64 wheels for Python 3.11, so we don't need a
+# full librealsense apt install — pyrealsense2 ships the SDK inline.
+
+FROM python:3.11-slim AS base
+
+# Runtime libs for open3d + pyrealsense2:
+#   libgl1, libglib2.0-0  → open3d's GUI/visualization stubs (loaded even in headless mode)
+#   libgomp1               → GNU OpenMP runtime; open3d's native code links against it
+#   libusb-1.0-0           → pyrealsense2 links against it for device enumeration
+#   ca-certificates        → HTTPS to Vercel + GCS
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
+    libusb-1.0-0 \
+    ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python deps first for better layer caching.
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY main.py build_mesh.py ./
+
+# Cloud Run injects $PORT (default 8080).
+ENV PORT=8080
+ENV PYTHONUNBUFFERED=1
+
+# Single worker, multi-threaded — Open3D releases the GIL during
+# native ops, and we want at most one mesh build per container instance
+# (matches --concurrency=1 on Cloud Run so we don't OOM).
+# Timeout matches the maximum Cloud Run request timeout (3600s).
+CMD exec gunicorn \
+    --bind ":${PORT}" \
+    --workers 1 \
+    --threads 4 \
+    --timeout 3600 \
+    --access-logfile - \
+    main:app

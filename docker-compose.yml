@@ -197,3 +197,42 @@ services:
 # The console (operator dashboard) is no longer a container — it runs natively
 # on the host as the atl4s-console systemd service, since it manages this very
 # stack (Docker socket, lifecycle) and shouldn't live inside it. See console/.
+
+  # mesh-worker: pulls scan.bag jobs from Pub/Sub (subscription mesh-build-pull
+  # on topic inspection-requests), runs a single bag-playback pass that builds
+  # the Poisson mesh, the three glb variants, the voxel-hash defect bundle
+  # (defects.json v3), and renders splat.png + path.png via Open3D's
+  # OffscreenRenderer. All artifacts mirror to GCS and push to S3. Calls
+  # crackseg over loopback at 127.0.0.1:8092 for per-frame anomaly masks.
+  # Requires the L4 GPU for the Filament-backed offscreen renderer.
+  mesh-worker:
+    build:
+      context: ./services/mesh-worker
+    image: atl4s/mesh-worker:latest
+    container_name: atl4s-mesh-worker
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      GCP_PROJECT_ID: atl4s-arachnid
+      PUBSUB_SUBSCRIPTION: mesh-build-pull
+      ARACHNID_CRACKSEG_URL: http://127.0.0.1:8092
+      ARACHNID_DEFECT_VOXEL_M: 0.04
+      ARACHNID_DEFECT_MIN_HITS: 3
+      VERCEL_API: https://arachnid-flight.vercel.app
+      GCS_BUCKET: atl4s-rosbags
+      NVIDIA_VISIBLE_DEVICES: all
+      # graphics is what Filament/EGL needs on top of crackseg's compute,utility
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

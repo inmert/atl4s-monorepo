@@ -233,7 +233,7 @@ services:
               count: 1
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen(\u0027http://127.0.0.1:8080/healthz\u0027,timeout=3).status==200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3

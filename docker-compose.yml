@@ -218,6 +218,8 @@ services:
       ARACHNID_CRACKSEG_URL: http://127.0.0.1:8092
       ARACHNID_DEFECT_VOXEL_M: 0.04
       ARACHNID_DEFECT_MIN_HITS: 3
+      # Process two bags in parallel — frame loop of one overlaps Poisson of the other.
+      MAX_CONCURRENT: "2"
       VERCEL_API: https://arachnid-flight.vercel.app
       GCS_BUCKET: atl4s-rosbags
       NVIDIA_VISIBLE_DEVICES: all

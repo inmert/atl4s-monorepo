@@ -127,6 +127,63 @@ def mesh_already_in_gcs(site_id: str, scan_id: str) -> bool:
     return blob.exists()
 
 
+# ── Progress reporting (consumed by /api/aws/bag/queue + dashboard) ──────
+#
+# Pub/Sub messages carry no progress signal — once dispatched, the dashboard
+# has no idea whether the worker is downloading the bag, deep in Poisson,
+# or hung. We write progress.json to S3 next to mesh-request.json on every
+# milestone so queue.js can surface the actual stage instead of guessing
+# from sentinel age.
+#
+# Stages (in order):
+#   bag-fetch              downloading scan.bag from S3
+#   frame-loop             playing the bag through the FrameSinks
+#   poisson-reconstruction Open3D Poisson + density trim
+#   mesh-variants          glb + tablet + mobile Draco encode
+#   renders                Open3D OffscreenRenderer (splat + path PNGs)
+#   defects-flush          DefectTracker.flush() + confidence filtering
+#   pdf-build              reportlab assembly
+#   done                   all artifacts in S3, message ack'd
+#
+# Each emission overwrites the same S3 key — readers always see the latest
+# state. Emission failures NEVER fail the build (the worker still runs).
+PROGRESS_SCHEMA = "arachnid.progress/v1"
+
+
+def emit_progress(
+    site_id: str,
+    scan_id: str,
+    stage: str,
+    started_at_iso: str | None = None,
+    **extras,
+) -> None:
+    """Write progress.json to S3 next to mesh-request.json. Best-effort."""
+    from datetime import datetime, timezone
+    payload = {
+        "schema":      PROGRESS_SCHEMA,
+        "site_id":     site_id,
+        "scan_id":     scan_id,
+        "stage":       stage,
+        "updated_at":  datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "started_at":  started_at_iso,
+        **extras,
+    }
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, prefix=f"progress-{scan_id}-",
+        ) as f:
+            json.dump(payload, f)
+            tmp_path = f.name
+        try:
+            push_to_s3(tmp_path, site_id, scan_id, "progress.json", "application/json")
+        finally:
+            try: os.unlink(tmp_path)
+            except OSError: pass
+    except Exception as e:
+        # Never break the build over a progress hiccup.
+        log.warning("progress emit (%s) failed: %s", stage, e)
+
+
 def _slam_stats_from_pose_track(translations: list, bag_size: int) -> dict:
     """Derive the SLAM stats the report.pdf wants from the pose track we
     already collected during playback. No bag re-read needed."""
@@ -530,6 +587,10 @@ def build_mesh_variants(mesh: o3d.geometry.TriangleMesh, td: str) -> dict[str, s
 
 def build_mesh_for_scan(site_id: str, scan_id: str) -> dict:
     log.info("=== mesh build: site=%s scan=%s ===", site_id, scan_id)
+    from datetime import datetime, timezone
+    job_started = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    emit = lambda stage, **kw: emit_progress(site_id, scan_id, stage, job_started, **kw)
+    emit("dispatched")
 
     # Mesh-side idempotency: skip if mesh.ply already in GCS. The defect
     # path is intentionally NOT gated on this — a re-run that re-detects
@@ -546,8 +607,10 @@ def build_mesh_for_scan(site_id: str, scan_id: str) -> dict:
         ply_path     = os.path.join(td, "mesh.ply")
         defects_path = os.path.join(td, "defects.json")
 
+        emit("bag-fetch")
         bag_size = fetch_bag(site_id, scan_id, bag_path)
         mirror_to_gcs(bag_path, f"{site_id}/{scan_id}/scan.bag")
+        emit("frame-loop", bag_size=bag_size)
 
         # Two sinks share the single bag-playback loop:
         #   MeshAccumulator → mesh.ply
@@ -578,11 +641,13 @@ def build_mesh_for_scan(site_id: str, scan_id: str) -> dict:
 
         # ── Mesh: Poisson reconstruct + ship ──────────────────────────────
         if mesh_sink is not None:
+            emit("poisson-reconstruction", frames=defect_sink.frames_processed)
             pcd = mesh_sink.flush()
             if len(pcd.points) < MIN_POINTS:
                 raise RuntimeError(
                     f"not enough points to reconstruct ({len(pcd.points)} < {MIN_POINTS})")
             mesh = reconstruct_mesh(pcd, VOXEL, POISSON_DEPTH)
+            emit("mesh-variants", verts=len(mesh.vertices), tris=len(mesh.triangles))
 
             # Legacy mesh.ply — the current dashboard loads this directly.
             o3d.io.write_triangle_mesh(
@@ -623,6 +688,7 @@ def build_mesh_for_scan(site_id: str, scan_id: str) -> dict:
             # Playwright, but headless WebGL produced blank panels. Render
             # the same images server-side via Open3D's OffscreenRenderer,
             # ship them to S3, and the PDF just fetches + embeds.
+            emit("renders")
             try:
                 from renders import render_splat_and_path
                 splat_path  = os.path.join(td, "splat.png")
@@ -647,6 +713,7 @@ def build_mesh_for_scan(site_id: str, scan_id: str) -> dict:
                 log.exception("renders raised: %s", e)
 
         # ── Defects: serialize + ship v3 ──────────────────────────────────
+        emit("defects-flush", grid_voxels=len(defect_sink.grid))
         payload = defect_sink.flush()
         with open(defects_path, "w") as f:
             json.dump(payload, f)
@@ -670,6 +737,7 @@ def build_mesh_for_scan(site_id: str, scan_id: str) -> dict:
         # /api/aws/bag/get-url?part=report.pdf. Build failure does not
         # break the rest of the job — operator can re-run a PDF-only build
         # from the existing defects.json + PNGs later if needed.
+        emit("pdf-build", defects=len(payload.get("defects", [])))
         try:
             from report import build_report
             slam_stats = _slam_stats_from_pose_track(pose_sink.translations, bag_size)
@@ -691,4 +759,5 @@ def build_mesh_for_scan(site_id: str, scan_id: str) -> dict:
         except Exception as e:
             log.exception("report.pdf build failed: %s", e)
 
+        emit("done", defects=result.get("defects"), report_size=result.get("report_size"))
         return result

@@ -136,9 +136,20 @@ def _handle(message: pubsub_v1.subscriber.message.Message) -> None:
         log.info("build OK msg=%s · %.1fs · %s", msg_id, time.time() - t0, result)
         message.ack()
         _LAST_OK["ack"] += 1
+    except RuntimeError as e:
+        # Permanent failure (e.g. bag has no usable depth, missing pose
+        # stream). Redelivery will hit the same wall — ACK so Pub/Sub
+        # stops retrying. The S3 mesh-request.json sentinel survives as
+        # a record of the dropped request; an operator can re-trigger
+        # after the source bag is fixed.
+        log.error("build PERMANENT-FAILURE msg=%s · %.1fs · %s — acking",
+                  msg_id, time.time() - t0, e)
+        message.ack()
+        _LAST_OK["ack"] += 1   # treated as terminal, not as a retry win
     except Exception as e:
         # NACK → Pub/Sub redelivers with exponential backoff. Logged
-        # stacktrace lands in journalctl on the VM.
+        # stacktrace lands in journalctl on the VM. Reserved for
+        # transient failures (network blips, GCS 5xx, OOM).
         log.error("build FAILED msg=%s · %.1fs · %s\n%s",
                   msg_id, time.time() - t0, e, traceback.format_exc())
         message.nack()

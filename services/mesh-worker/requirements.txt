@@ -7,3 +7,4 @@ numpy==1.26.4
 open3d==0.18.0
 pyrealsense2==2.55.1.6486
 Pillow==10.4.0
+reportlab==4.2.5

@@ -127,6 +127,44 @@ def mesh_already_in_gcs(site_id: str, scan_id: str) -> bool:
     return blob.exists()
 
 
+def _slam_stats_from_pose_track(translations: list, bag_size: int) -> dict:
+    """Derive the SLAM stats the report.pdf wants from the pose track we
+    already collected during playback. No bag re-read needed."""
+    from datetime import datetime, timezone
+    n = len(translations)
+    if n == 0:
+        return {
+            "captured_at": "—", "duration_s": "—",
+            "bag_size_mb": f"{bag_size / 1024 / 1024:.1f}",
+            "frame_count": 0, "pose_count": 0,
+            "walked_m": "—",
+            "bbox_min": ["—","—","—"], "bbox_max": ["—","—","—"],
+            "bbox_size": ["—","—","—"], "volume_m3": 0.0,
+        }
+    pts = np.asarray(translations, dtype=np.float32)
+    diffs = np.diff(pts, axis=0)
+    walked = float(np.linalg.norm(diffs, axis=1).sum()) if len(diffs) else 0.0
+    bb_min = pts.min(axis=0)
+    bb_max = pts.max(axis=0)
+    size = bb_max - bb_min
+    vol = float(size[0] * size[1] * size[2])
+    # Pose stream on iPad is 60 Hz; the duration estimate is good enough
+    # for the operator deliverable. (Exact bag-time deltas are recoverable
+    # via fs.get_timestamp() in the loop, but that's a Stage 2 refinement.)
+    duration_s = n / 60.0
+    return {
+        "captured_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", " UTC"),
+        "duration_s":  f"{duration_s:.1f}",
+        "bag_size_mb": f"{bag_size / 1024 / 1024:.1f}",
+        "frame_count": n, "pose_count": n,
+        "walked_m":    f"{walked:.2f}",
+        "bbox_min":    [f"{x:.2f}" for x in bb_min.tolist()],
+        "bbox_max":    [f"{x:.2f}" for x in bb_max.tolist()],
+        "bbox_size":   [f"{x:.2f}" for x in size.tolist()],
+        "volume_m3":   vol,
+    }
+
+
 def fetch_prior_defects(site_id: str, scan_id: str) -> dict | None:
     """Pull the prior defects.json from S3 if it exists. Returns None on miss.
 
@@ -625,5 +663,32 @@ def build_mesh_for_scan(site_id: str, scan_id: str) -> dict:
             # the whole job. Log + report the partial result.
             log.exception("defects.json upload failed: %s", e)
             result["defects_error"] = str(e)
+
+        # ── Operator-deliverable PDF (report.pdf) ─────────────────────────
+        # Built inline now that splat/path/defects are all in `td`. Pushes
+        # to S3 next to the other artifacts; consumers can fetch via
+        # /api/aws/bag/get-url?part=report.pdf. Build failure does not
+        # break the rest of the job — operator can re-run a PDF-only build
+        # from the existing defects.json + PNGs later if needed.
+        try:
+            from report import build_report
+            slam_stats = _slam_stats_from_pose_track(pose_sink.translations, bag_size)
+            pdf_path = os.path.join(td, "report.pdf")
+            ok = build_report(
+                site_id=site_id, scan_id=scan_id,
+                defects_payload=payload,
+                splat_png_path=os.path.join(td, "splat.png"),
+                path_png_path=os.path.join(td, "path.png"),
+                slam_stats=slam_stats,
+                out_path=pdf_path,
+            )
+            if ok and os.path.isfile(pdf_path):
+                mirror_to_gcs(pdf_path, f"{site_id}/{scan_id}/report.pdf")
+                push_to_s3(pdf_path, site_id, scan_id, "report.pdf", "application/pdf")
+                result["report_size"] = os.path.getsize(pdf_path)
+                log.info("report.pdf shipped · %.1f KB",
+                         result["report_size"] / 1024)
+        except Exception as e:
+            log.exception("report.pdf build failed: %s", e)
 
         return result

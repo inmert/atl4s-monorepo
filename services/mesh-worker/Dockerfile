@@ -37,7 +37,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
  && pip install --no-cache-dir google-cloud-pubsub
 
 # Source. defects/ is a package directory — copy as such.
-COPY main.py build_mesh.py vm_worker.py renders.py ./
+COPY main.py build_mesh.py vm_worker.py renders.py report.py ./
 COPY defects/ ./defects/
 
 # VM-side healthcheck endpoint

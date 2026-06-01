@@ -37,6 +37,21 @@ log = logging.getLogger("mesh-worker.defect-tracker")
 
 MIN_HITS = int(os.environ.get("ARACHNID_DEFECT_MIN_HITS", "3"))
 
+# Confidence filters applied at flush() time. Without these the big bag
+# produces 500+ "defects" because crackseg in `color` mode (CIELAB local
+# deviation) flags any bright/contrasty pixel — most of those land in
+# 1-2 voxel clusters with very few hits and aren't real cracks.
+#
+# MIN_VOXELS_PER_DEFECT     drop a confirmed cluster smaller than N voxels.
+#                           At 4 cm voxels: N=3 cuts everything under ~190 cm³.
+# MIN_TOTAL_HITS_PER_DEFECT drop a cluster whose summed voxel hit count is
+#                           below T. A defect seen 12+ times across all its
+#                           voxels has appeared in roughly that many frames,
+#                           so a 12-hit floor maps to "appeared in at least
+#                           ~12 / stride source frames" — well above noise.
+MIN_VOXELS_PER_DEFECT     = int(os.environ.get("ARACHNID_DEFECT_MIN_VOXELS",      "3"))
+MIN_TOTAL_HITS_PER_DEFECT = int(os.environ.get("ARACHNID_DEFECT_MIN_TOTAL_HITS", "12"))
+
 # 6-connectivity. Defects with cells touching face-to-face merge.
 # Diagonal/edge connectivity (18 or 26) would over-merge separate
 # defects whose voxels happen to share a corner; 6 is the conservative pick.
@@ -233,16 +248,46 @@ class DefectTracker:
     # ── Emit v3 payload ────────────────────────────────────────────────────
 
     def flush(self) -> dict:
-        """Build the defects.json v3 payload. Volume = voxel-count × edge³."""
+        """Build the defects.json v3 payload. Volume = voxel-count × edge³.
+
+        Confidence pruning happens here, not during candidate-promotion:
+        a defect is rejected only after we've seen its final voxel +
+        hit footprint. That keeps the running grid logic simple AND lets
+        an operator-tuned threshold be applied to a previously-shipped
+        defects.json without re-running the whole pipeline."""
         by_defect: dict[str, list[Voxel]] = defaultdict(list)
         for v in self.grid.values():
             if v.defect_id is not None:
                 by_defect[v.defect_id].append(v)
 
+        # ── Confidence filtering ────────────────────────────────────────
+        dropped_low_voxels = 0
+        dropped_low_hits = 0
+        retained: dict[str, list[Voxel]] = {}
+        for did, voxels in by_defect.items():
+            voxel_count = len(voxels)
+            # Sum of hit counts across all voxels in this defect; ≈ how many
+            # source frames flagged any of its pixels.
+            total_hits = sum(v.hits for v in voxels)
+            if voxel_count < MIN_VOXELS_PER_DEFECT:
+                dropped_low_voxels += 1
+                continue
+            if total_hits < MIN_TOTAL_HITS_PER_DEFECT:
+                dropped_low_hits += 1
+                continue
+            retained[did] = voxels
+        by_defect = retained
+        if dropped_low_voxels or dropped_low_hits:
+            log.info("dedup filters dropped %d defects below MIN_VOXELS=%d, "
+                     "%d below MIN_TOTAL_HITS=%d",
+                     dropped_low_voxels, MIN_VOXELS_PER_DEFECT,
+                     dropped_low_hits,   MIN_TOTAL_HITS_PER_DEFECT)
+
         defects: list[dict] = []
         for did, voxels in by_defect.items():
             voxel_count = len(voxels)
             volume_m3 = voxel_count * (self.voxel_m ** 3)
+            total_hits = sum(v.hits for v in voxels)
 
             # Pool raw points (capped per voxel) for centroid + hull.
             raw_lists = [v.raw_points for v in voxels if v.raw_points]
@@ -267,6 +312,7 @@ class DefectTracker:
                 "first_seen_at":     self.first_seen_at.get(did, _now_iso()),
                 "last_seen_at":      _now_iso(),
                 "frames_observed":   int(frames_observed),
+                "total_hits":        int(total_hits),  # NEW — sum across all defect voxels
                 "first_frame":       int(min(real_first)) if real_first else -1,
                 "last_frame":        int(max(real_last))  if real_last  else -1,
                 "voxel_count":       int(voxel_count),
@@ -287,8 +333,12 @@ class DefectTracker:
             "scan_id":                 self.scan_id,
             "voxel_size_m":            self.voxel_m,
             "min_hits":                self.min_hits,
+            "min_voxels_per_defect":   MIN_VOXELS_PER_DEFECT,
+            "min_total_hits_per_defect": MIN_TOTAL_HITS_PER_DEFECT,
             "frames_processed":       self.frames_processed,
             "frames_with_detections": self.frames_with_detections,
+            "dropped_low_voxels":     dropped_low_voxels,
+            "dropped_low_hits":       dropped_low_hits,
             "generated_at":           _now_iso(),
             "defects":                defects,
         }
